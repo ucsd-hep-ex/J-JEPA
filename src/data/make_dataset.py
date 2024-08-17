@@ -30,7 +30,6 @@ import os.path as osp
 import tqdm
 
 import h5py
-import json
 
 def zero_pad_jets(arr, max_nconstit=128):
     """
@@ -182,7 +181,7 @@ def main(args):
     logger = logging.getLogger(__name__)
     logger.info('making final data set from raw data')
     label = args.label
-    hdf5_file = f"/ssl-jet-vol-v2/toptagging/{label}/raw/{label}.h5"
+    hdf5_file = f"/ssl-jet-vol-v3/toptagging/{label}/raw/{label}.h5"
     vector.register_awkward()
     
     print("reading h5 file")
@@ -247,6 +246,7 @@ def main(args):
     labels = []
     
     for jet_index in tqdm.tqdm(range(len(df))):
+    # for jet_index in tqdm.tqdm(range(10)):  
         # dim 1 ordering: 'part_eta','part_phi','part_pt_log', 'part_e_log', 'part_logptrel', 'part_logerel','part_deltaR'
         part_deta = zero_pad_jets(
             v["part_deta"][jet_index].to_numpy().reshape(-1, 1)
@@ -271,7 +271,7 @@ def main(args):
     print(f"features array shape: {features_array.shape}")
     print(f"labels array shape: {labels_array.shape}")
 
-    save_path = f"/ssl-jet-vol-v2/I-JEPA-Jets/data/{label}"
+    save_path = f"/ssl-jet-vol-v3/I-JEPA-Jets/data/{label}"
     os.system(f"mkdir -p {save_path}")  # -p: create parent dirs if needed, exist_ok
     
     print("-------------------------------")
@@ -280,7 +280,7 @@ def main(args):
 
     n_subjets = args.n_subjets
     n_ptcls_per_subjet = args.n_ptcls_per_subjet
-    with h5py.File(f'{save_path}/{label}_{n_subjets}_{n_ptcls_per_subjet}.h5', 'w') as hdf:
+    with h5py.File(f'{save_path}/{label}_{n_subjets}_{n_ptcls_per_subjet}_no_json.h5', 'w') as hdf:
         # Create group for particles
         particles_group = hdf.create_group("particles")
         # Storing the particles features array directly
@@ -288,30 +288,34 @@ def main(args):
         particles_group.create_dataset("labels", data=labels_array)
         
         # Initialize an empty list to store serialized subjets information
-        serialized_subjets = []
+        subjets = []
         
     
         for jet_idx in tqdm.tqdm(range(len(df))):  
+        # for jet_idx in tqdm.tqdm(range(10)):  
             subjets_info = get_subjets(_px[jet_idx], _py[jet_idx], _pz[jet_idx], _e[jet_idx])
 
             subjets_padded = zero_pad(subjets_info, n_subjets, n_ptcls_per_subjet)
         
-            # Serialize subjets_info as a JSON string and add it to the list
-            serialized_subjets.append(json.dumps(subjets_padded))
-        
-        # Convert list of JSON strings to numpy object array for storage
-        serialized_subjets_array = np.array(serialized_subjets, dtype='object')
-        
-        # Create a special dtype for variable-length strings
-        dt = h5py.special_dtype(vlen=str)
-        
-        # Create dataset for serialized subjets using variable-length strings
-        ds = hdf.create_dataset("subjets", data=serialized_subjets_array, dtype=dt)
-    
+            subjets.append(subjets_padded)
 
-    
-    
-
+        jets_group = hdf.create_group('jets')
+        for jet_idx, jet in enumerate(subjets):
+            
+            jet_group = jets_group.create_group(f'jet_{jet_idx}')
+            for subjet_idx, subjet in enumerate(jet):
+                subjet_group = jet_group.create_group(f'subjet_{subjet_idx}')
+                features_group = subjet_group.create_group('features')
+                indices_ds = subjet_group.create_dataset('indices', data=subjet['indices'])
+                
+                for k in subjet['features'].keys():
+                    features_group.create_dataset(k, data=subjet['features'][k])
+            
+        # # Convert list of JSON strings to numpy object array for storage
+        # subjets_array = np.concatenate(subjets, axis=0)
+        
+        # # Create dataset for serialized subjets using variable-length strings
+        # ds = hdf.create_dataset("subjets", data=subjets_array)
 
 if __name__ == '__main__':
     log_fmt = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
