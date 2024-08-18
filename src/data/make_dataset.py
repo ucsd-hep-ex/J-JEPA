@@ -280,7 +280,7 @@ def main(args):
 
     n_subjets = args.n_subjets
     n_ptcls_per_subjet = args.n_ptcls_per_subjet
-    with h5py.File(f'{save_path}/{label}_{n_subjets}_{n_ptcls_per_subjet}_no_json.h5', 'w') as hdf:
+    with h5py.File(f'{save_path}/{label}_{n_subjets}_{n_ptcls_per_subjet}{args.tag}.h5', 'w') as hdf:
         # Create group for particles
         particles_group = hdf.create_group("particles")
         # Storing the particles features array directly
@@ -338,6 +338,13 @@ if __name__ == '__main__':
         help="train/val/test",
     )
     parser.add_argument(
+        "--tag",
+        type=str,
+        action="store",
+        default="",
+        help="a tag for the dataset, e.g. _no_json",
+    )
+    parser.add_argument(
         "--n-subjets",
         type=int,
         action="store",
@@ -349,5 +356,6 @@ if __name__ == '__main__':
         action="store",
         help="number of particles per subjet",
     )
+    
     args = parser.parse_args()
     main(args)
