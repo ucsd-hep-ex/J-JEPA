@@ -1,0 +1,9 @@
+INPUTS:
+  # -----------------------------------------------------------------------------
+  # REQUIRED - SEQUENTIAL - inputs which can have an arbitrary number of vectors.
+  # -----------------------------------------------------------------------------
+  SEQUENTIAL:
+    Jets:
+      pT: none
+      eta: none
+      phi: none
