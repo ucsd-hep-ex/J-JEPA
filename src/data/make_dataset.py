@@ -190,8 +190,8 @@ def main(args):
     
     print("reading h5 file")
     df = pd.read_hdf(hdf5_file, key="table")
-    # num_jets = len(df)
-    num_jets = 10000
+    num_jets = len(df)
+    # num_jets = 10000
     print("finished reading h5 file")
 
     print("-------------------------------")
