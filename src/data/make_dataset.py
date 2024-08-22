@@ -178,6 +178,10 @@ def main(args):
     """ Runs data processing scripts to turn raw data from (../raw) into
         cleaned data ready to be analyzed (saved in ../processed).
     """
+    n_subjets = args.n_subjets
+    n_ptcls_per_subjet = args.n_ptcls_per_subjet
+    print('n_subjets', n_subjets)
+    print('n_ptcls_per_subjet', n_ptcls_per_subjet)
     logger = logging.getLogger(__name__)
     logger.info('making final data set from raw data')
     label = args.label
@@ -186,6 +190,8 @@ def main(args):
     
     print("reading h5 file")
     df = pd.read_hdf(hdf5_file, key="table")
+    # num_jets = len(df)
+    num_jets = 10000
     print("finished reading h5 file")
 
     print("-------------------------------")
@@ -245,8 +251,7 @@ def main(args):
     features = []
     labels = []
     
-    for jet_index in tqdm.tqdm(range(len(df))):
-    # for jet_index in tqdm.tqdm(range(10)):  
+    for jet_index in tqdm.tqdm(range(num_jets)): 
         # dim 1 ordering: 'part_eta','part_phi','part_pt_log', 'part_e_log', 'part_logptrel', 'part_logerel','part_deltaR'
         part_deta = zero_pad_jets(
             v["part_deta"][jet_index].to_numpy().reshape(-1, 1)
@@ -271,51 +276,60 @@ def main(args):
     print(f"features array shape: {features_array.shape}")
     print(f"labels array shape: {labels_array.shape}")
 
+    part_feature_names = ['part_deta', 'part_dphi', 'part_pt_log', 'part_e_log']
+    part_features = {name: features_array[:, i, :] for i, name in enumerate(part_feature_names)}
+    part_features['subjet_indices'] = np.zeros((num_jets, 128))
+    print(part_features['part_deta'].shape)
+
     save_path = f"/ssl-jet-vol-v3/I-JEPA-Jets/data/{label}"
     os.system(f"mkdir -p {save_path}")  # -p: create parent dirs if needed, exist_ok
-    
+
+    # Initialize an empty list to store serialized subjets information
+    subjet_feature_names = ['subjet_pt', 'subjet_eta', 'subjet_phi', 'subjet_num_ptcls']
+    subjets = {name : np.zeros((num_jets, args.n_subjets)) for i, name in enumerate(subjet_feature_names)}
+    subjets['particle_indices'] = np.zeros((num_jets, args.n_subjets, args.n_ptcls_per_subjet))
+
+    print("-------------------------------")
+    print("Obtain subjet features arrays")
+    print("-------------------------------\n")
+    for jet_idx in tqdm.tqdm(range(num_jets)):  
+        subjets_info = get_subjets(_px[jet_idx], _py[jet_idx], _pz[jet_idx], _e[jet_idx])
+
+        subjets_padded = zero_pad(subjets_info, n_subjets, n_ptcls_per_subjet)
+        subjets_padded = subjets_padded[:n_subjets]
+        if len(subjets_padded) > 20:
+            print('length of subjets_padded', len(subjets_padded))
+        for subjet_idx, subjet in enumerate(subjets_padded):
+            subjets['subjet_pt'][jet_idx, subjet_idx] = subjet['features']['pT']
+            subjets['subjet_eta'][jet_idx, subjet_idx] = subjet['features']['eta']
+            subjets['subjet_phi'][jet_idx, subjet_idx] = subjet['features']['phi']
+            subjets['subjet_num_ptcls'][jet_idx, subjet_idx] = subjet['features']['num_ptcls']
+            subjets['particle_indices'][jet_idx, subjet_idx, :] = np.array(subjet['indices'])
+            
+            if subjet['features']['num_ptcls'] > 0:
+                for ptcl_idx in subjet['indices']:
+                    if ptcl_idx != -1 and ptcl_idx < 128:
+                        part_features['subjet_indices'][jet_idx, ptcl_idx] = int(subjet_idx)
+        #     if jet_idx == 0:
+        #         print(subjet_idx, subjet['indices'])
+        # print(part_features['indices'][jet_idx,:])
+
     print("-------------------------------")
     print("Save to h5")
     print("-------------------------------\n")
 
-    n_subjets = args.n_subjets
-    n_ptcls_per_subjet = args.n_ptcls_per_subjet
     with h5py.File(f'{save_path}/{label}_{n_subjets}_{n_ptcls_per_subjet}{args.tag}.h5', 'w') as hdf:
-        # Create group for particles
         particles_group = hdf.create_group("particles")
-        # Storing the particles features array directly
-        particles_group.create_dataset("features", data=features_array)
-        particles_group.create_dataset("labels", data=labels_array)
+        part_feature_names.append('subjet_indices')
+        for name in part_features.keys():
+            particles_group.create_dataset(name, data=part_features[name])
         
-        # Initialize an empty list to store serialized subjets information
-        subjets = []
+        hdf.create_dataset("labels", data=labels_array)
         
-    
-        for jet_idx in tqdm.tqdm(range(len(df))):  
-        # for jet_idx in tqdm.tqdm(range(10)):  
-            subjets_info = get_subjets(_px[jet_idx], _py[jet_idx], _pz[jet_idx], _e[jet_idx])
-
-            subjets_padded = zero_pad(subjets_info, n_subjets, n_ptcls_per_subjet)
+        subjets_group = hdf.create_group('subjets')
+        for name in subjets.keys():
+            subjets_group.create_dataset(name, data=subjets[name])
         
-            subjets.append(subjets_padded)
-
-        jets_group = hdf.create_group('jets')
-        for jet_idx, jet in enumerate(subjets):
-            
-            jet_group = jets_group.create_group(f'jet_{jet_idx}')
-            for subjet_idx, subjet in enumerate(jet):
-                subjet_group = jet_group.create_group(f'subjet_{subjet_idx}')
-                features_group = subjet_group.create_group('features')
-                indices_ds = subjet_group.create_dataset('indices', data=subjet['indices'])
-                
-                for k in subjet['features'].keys():
-                    features_group.create_dataset(k, data=subjet['features'][k])
-            
-        # # Convert list of JSON strings to numpy object array for storage
-        # subjets_array = np.concatenate(subjets, axis=0)
-        
-        # # Create dataset for serialized subjets using variable-length strings
-        # ds = hdf.create_dataset("subjets", data=subjets_array)
 
 if __name__ == '__main__':
     log_fmt = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
