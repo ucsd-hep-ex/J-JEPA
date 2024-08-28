@@ -1,9 +1,7 @@
 INPUTS:
-  # -----------------------------------------------------------------------------
-  # REQUIRED - SEQUENTIAL - inputs which can have an arbitrary number of vectors.
-  # -----------------------------------------------------------------------------
   SEQUENTIAL:
-    Jets:
-      pT: none
-      eta: none
-      phi: none
+    Particles:
+      part_deta: normalize
+      part_dphi: normalize
+      part_pt_log: none
+      part_e_log: none
