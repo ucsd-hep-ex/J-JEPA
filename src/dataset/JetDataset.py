@@ -233,8 +233,6 @@ class JetDataset(Dataset):
         mask = torch.arange(N_part_per_subjet).expand(N_subjets, N_part_per_subjet) < num_real_ptcls.unsqueeze(1)
         
         # Gather indices within bounds
-        if (indices >= 128).any():
-            continue
         all_real_indices = indices[:, :N_part_per_subjet].long()
         
         valid_features = particle_features[all_real_indices]
