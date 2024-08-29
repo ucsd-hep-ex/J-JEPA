@@ -197,7 +197,7 @@ def main(args):
     print("-------------------------------")
     print("Obtain (pT, eta_rel, phi_rel, E)")
     print("-------------------------------\n")
-    def _col_list(prefix, max_particles=200):
+    def _col_list(prefix, max_particles=128):
         return ["%s_%d" % (prefix, i) for i in range(max_particles)]
 
     _px = df[_col_list("PX")].values
