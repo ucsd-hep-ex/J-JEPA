@@ -63,7 +63,7 @@ class JetDataset(Dataset):
     Args:
         Dataset (_type_): _description_
     """
-    def __init__(self, file_path, num_jets=None, transform=None, config=None, debug=False):
+    def __init__(self, file_path, num_jets=None, transform=None, config=None, debug=False, labels=False):
         print(f"Initializing JetDataset with file: {file_path}")
         
         with h5py.File(file_path, 'r') as hdf:
@@ -77,6 +77,7 @@ class JetDataset(Dataset):
         self.transform = transform
         self.config = config
         self.debug = debug
+        self.return_labels = labels
         if self.debug:
             print(f"Raw dataset size: {self.labels.shape[0]} jets")
             print("Particle features shapes")
@@ -101,6 +102,11 @@ class JetDataset(Dataset):
                     print(f"shape of {name}: {self.subjets[name].shape}")
         self.labels = self.labels[:num_jets]
         print(f"Final dataset size: {self.labels.shape[0]} jets")
+        if self.return_labels:
+            print("__getitem__ returns (x, particle_features, subjets, indices, subjet_mask, particle_mask, labels)")
+        else:
+            print("__getitem__ returns (x, particle_features, subjets, indices, subjet_mask, particle_mask)")
+            
 
     def filter_good_jets(self):
         """
@@ -208,26 +214,13 @@ class JetDataset(Dataset):
         particle_features = torch.from_numpy(particle_features)
         # # Need x to be of shape (N_subjets, N_part, N_part_ftr)
         # # particle_features: (N_part, N_part_ftr)
-        # _, N_part_ftr = particle_features.shape  # 128, 4
-        # N_part_per_subjet = indices.shape[-1] # 30
-        # N_subjets = subjets.shape[0] # 20
-        # x = torch.zeros((N_subjets, N_part_per_subjet, N_part_ftr)) # (20, 30, 4)
-        # for i in range(N_subjets):
-        #     num_real_ptcls = int(subjets[i, -1])
-        #     real_indices = indices[i, :].long()[:num_real_ptcls] # truncate to only real particles
-        #     assert(-1 not in real_indices)
-        #     x[i, :num_real_ptcls, :] = particle_features[real_indices, :]
-
-
-        
-        # Dimensions and pre-allocation of output tensor
         N_part_per_jet, N_part_ftr = particle_features.shape  # Example: 128, 4
         N_part_per_subjet = indices.shape[-1]
         N_subjets = subjets.shape[0]  # Example: 20
-        num_real_ptcls = subjets[:, -1]  # Assuming last column gives the real particles
+        num_real_ptcls = subjets[:, -1]  
 
         # Prepare x tensor
-        x2 = torch.zeros((N_subjets, N_part_per_subjet, N_part_ftr))
+        x = torch.zeros((N_subjets, N_part_per_subjet, N_part_ftr))
         
         # Create a mask for valid indices
         mask = torch.arange(N_part_per_subjet).expand(N_subjets, N_part_per_subjet) < num_real_ptcls.unsqueeze(1)
@@ -243,11 +236,13 @@ class JetDataset(Dataset):
         # print("expanded mask", expanded_mask.shape)
         
         # Apply expanded mask
-        x2[expanded_mask] = valid_features[expanded_mask].to(torch.float)
+        x[expanded_mask] = valid_features[expanded_mask].to(torch.float)
 
-        # assert((x==x2).all())
-
-        return x2, particle_features, subjets, indices, subjet_mask, particle_mask
+        return_tuple = (x, particle_features, subjets, indices, subjet_mask, particle_mask)
+        if self.return_labels:
+            return_tuple = (x, particle_features, subjets, indices, subjet_mask, particle_mask, self.labels[idx])
+            
+        return return_tuple 
 
     def process_subjets(self, subjets):
         """
