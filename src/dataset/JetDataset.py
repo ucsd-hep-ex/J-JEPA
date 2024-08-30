@@ -71,7 +71,9 @@ class JetDataset(Dataset):
             self.particles = {name: hdf['particles'][name][:] for name in hdf['particles']}
             self.subjets = {name: hdf['subjets'][name][:] for name in hdf['subjets']}
             self.labels = hdf['labels'][:]
-        
+
+        # calculate subjet energy from E = pT * cosh(eta)
+        self.subjets['subjet_E'] = self.subjets['subjet_pt'] * np.cosh(self.subjets['subjet_eta'])
         self.transform = transform
         self.config = config
         self.debug = debug
@@ -174,6 +176,7 @@ class JetDataset(Dataset):
             print(f"\nFetching item {idx} from dataset")
         particle_feature_names = ['part_deta', 'part_dphi', 'part_pt_log', 'part_e_log']
         particle_features = np.stack([self.particles[name][idx] for name in particle_feature_names])
+        particle_features = particle_features.transpose()
         if self.debug:
             print("particle features shape", particle_features.shape)
         subjets = {name: self.subjets[name][idx] for name in self.subjets.keys()}
@@ -202,14 +205,56 @@ class JetDataset(Dataset):
         # print(f"Subjet mask data: {subjet_mask}")
         # print(f"Particle mask data: {particle_mask}")
 
-        return particle_features, subjets, indices, subjet_mask, particle_mask
+        particle_features = torch.from_numpy(particle_features)
+        # # Need x to be of shape (N_subjets, N_part, N_part_ftr)
+        # # particle_features: (N_part, N_part_ftr)
+        # _, N_part_ftr = particle_features.shape  # 128, 4
+        # N_part_per_subjet = indices.shape[-1] # 30
+        # N_subjets = subjets.shape[0] # 20
+        # x = torch.zeros((N_subjets, N_part_per_subjet, N_part_ftr)) # (20, 30, 4)
+        # for i in range(N_subjets):
+        #     num_real_ptcls = int(subjets[i, -1])
+        #     real_indices = indices[i, :].long()[:num_real_ptcls] # truncate to only real particles
+        #     assert(-1 not in real_indices)
+        #     x[i, :num_real_ptcls, :] = particle_features[real_indices, :]
+
+
+        
+        # Dimensions and pre-allocation of output tensor
+        N_part_per_jet, N_part_ftr = particle_features.shape  # Example: 128, 4
+        N_part_per_subjet = indices.shape[-1]
+        N_subjets = subjets.shape[0]  # Example: 20
+        num_real_ptcls = subjets[:, -1]  # Assuming last column gives the real particles
+
+        # Prepare x tensor
+        x2 = torch.zeros((N_subjets, N_part_per_subjet, N_part_ftr))
+        
+        # Create a mask for valid indices
+        mask = torch.arange(N_part_per_subjet).expand(N_subjets, N_part_per_subjet) < num_real_ptcls.unsqueeze(1)
+        
+        # Gather indices within bounds
+        all_real_indices = indices[:, :N_part_per_subjet].long()
+        
+        valid_features = particle_features[all_real_indices]
+        # print("valid features", valid_features.shape)
+        
+        # Expand mask to feature dimensions
+        expanded_mask = mask.unsqueeze(-1).expand(-1, -1, N_part_ftr)
+        # print("expanded mask", expanded_mask.shape)
+        
+        # Apply expanded mask
+        x2[expanded_mask] = valid_features[expanded_mask].to(torch.float)
+
+        # assert((x==x2).all())
+
+        return x2, particle_features, subjets, indices, subjet_mask, particle_mask
 
     def process_subjets(self, subjets):
         """
         Processes subjets to create tensor representations and masks.
 
         Parameters:
-        - subjets (dictionary): a dictionary with keys ['subjet_pt', 'subjet_eta', 'subjet_phi', 'subjet_num_ptcls', 'particle_indices']. 
+        - subjets (dictionary): a dictionary with keys ['subjet_pt', 'subjet_eta', 'subjet_phi', 'subjet_E, 'subjet_num_ptcls', 'particle_indices']. 
             each item is a numpy array of shape (N_subjets, ) or (N_subjets, N_particles) for the last key
 
         Returns:
@@ -228,7 +273,7 @@ class JetDataset(Dataset):
         
         particle_mask = torch.tensor(subjets['particle_indices'] != -1, dtype=torch.float32)
 
-        features = torch.stack([torch.from_numpy(subjets[name]) for name in ['subjet_pt', 'subjet_eta', 'subjet_phi', 'subjet_num_ptcls']], dim=0)
+        features = torch.stack([torch.from_numpy(subjets[name]) for name in ['subjet_pt', 'subjet_eta', 'subjet_phi', 'subjet_E', 'subjet_num_ptcls']], dim=0)
         features = features.t()
         
         indices = torch.from_numpy(subjets['particle_indices'])
