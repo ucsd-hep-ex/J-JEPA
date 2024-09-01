@@ -1,0 +1,5 @@
+{
+    "emb_dim": 496,
+    "activation": "relu",
+    "skip_connections": true
+}

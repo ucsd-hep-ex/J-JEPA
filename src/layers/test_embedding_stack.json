@@ -1,0 +1,5 @@
+{
+    "emb_dim": 496,
+    "activation": "gelu",
+    "skip_connections": true
+}
