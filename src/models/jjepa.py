@@ -2,7 +2,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-import src.util.positional_embedding.create_pos_emb_fn as create_pos_emb_fn
+from src.layers.embedding_stack import EmbeddingStack
+from src.util.positional_embedding import create_pos_emb_fn
+from src.options import Options
 
 class Attention(nn.Module):
     def __init__(self, dim, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0., proj_drop=0.):
@@ -51,6 +53,7 @@ class MLP(nn.Module):
         print(f"MLP output shape: {x.shape}")
         return x
 
+
 class Block(nn.Module):
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0., drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm):
         super().__init__()
@@ -71,18 +74,30 @@ class Block(nn.Module):
         return x
 
 class JetsTransformer(nn.Module):
-    def __init__(self, num_features, embed_dim, depth, num_heads, mlp_ratio, qkv_bias=False, qk_scale=None, drop_rate=0.0, attn_drop_rate=0.0, drop_path_rate=0.0, norm_layer=nn.LayerNorm):
+    def __init__(self, options: Options,
+                 depth, num_heads, mlp_ratio, qkv_bias=False, qk_scale=None, attn_drop_rate=0.0, drop_path_rate=0.0, norm_layer=nn.LayerNorm):
+        
         super().__init__()
         print("Initializing JetsTransformer module")
-        self.num_features = num_features
-        self.embed_dim = embed_dim
-        self.calc_pos_emb = create_pos_emb_fn(embed_dim)
+        self.num_part_ftr = options.num_part_ftr
+        self.embed_dim = options.emb_dim
+        self.calc_pos_emb = create_pos_emb_fn(options.emb_dim)
         
         # Adjust the input dimensions based on the new input shape
-        self.patch_embed = nn.Linear(num_features * 30, embed_dim)  # num_features * subjet_length
+        self.subjet_emb = nn.Linear(options.num_particles * options.num_part_ftr,
+                                    options.emb_dim)  # num_features * subjet_length
         
-        self.blocks = nn.ModuleList([Block(dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale, drop=drop_rate, attn_drop=attn_drop_rate, drop_path=drop_path_rate, norm_layer=norm_layer) for i in range(depth)])
-        self.norm = norm_layer(embed_dim)
+        self.blocks = nn.ModuleList([Block(dim=options.emb_dim,
+                                           num_heads=num_heads,
+                                           mlp_ratio=mlp_ratio,
+                                           qkv_bias=qkv_bias,
+                                           qk_scale=qk_scale,
+                                           drop=options.dropout,
+                                           attn_drop=attn_drop_rate,
+                                           drop_path=drop_path_rate,
+                                           norm_layer=norm_layer,
+                                           ) for i in range(depth)])
+        self.norm = norm_layer(options.emb_dim)
         self.apply(self._init_weights)
 
     def _init_weights(self, m):
@@ -94,29 +109,37 @@ class JetsTransformer(nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
-    def forward(self, x, subjet_ftrs):
-        print(f"JetsTransformer forward pass with input shape: {x.shape}")
-        # B: batch size
-        # N: Number of subjets
-        # C: Number of particle features
-        # L: Number of particles
-        B, N, C, L = x.shape
-        x = x.view(B, N, -1)  # Flatten last two dimensions to [B, N, C*L]
-        print(f"Flattened input shape: {x.shape}")
+    def forward(self, subjets, subjets_meta):
+        """
+        Inputs:
+            x: particles of subjets
+                shape: [bs, N_sj, N_part, N_part_ftr]
+            subjet_ftrs: 4 vec of subjets
+                shape: [bs, N_sj, N_sj_ftr=5]
+                N_sj_ftr: pt, eta, phi, E, num_part
+        Return:
+            subjet representations
+        """
+        # Flatten last two dimensions to [B, SJ, P*DP]
+        B, SJ, P, DP = subjets.shape
+        x = subjets.view(B, SJ, -1)
 
-        # emb
-        x = self.patch_embed(x)
+        # subjet emb
+        x = self.subjet_emb(x)
 
         # pos emb
-        x += self.calc_pos_emb(subjet_ftrs)
+        pos_emb = self.calc_pos_emb(subjets_meta)
+        print(pos_emb.shape)
+        x += pos_emb
 
+        # forward prop
         for blk in self.blocks:
             x = blk(x)
 
+        # norm
         x = self.norm(x)
 
-        print(f"JetsTransformer output shape: {x.shape}")
-        return x.view(B, N, -1)  # Reshape back if necessary
+        return x
 
 class JetsTransformerPredictor(nn.Module):
     def __init__(self, num_features, embed_dim, predictor_embed_dim, depth, num_heads, mlp_ratio, qkv_bias=True, qk_scale=None, drop_rate=0., attn_drop_rate=0., drop_path_rate=0., norm_layer=nn.LayerNorm):
