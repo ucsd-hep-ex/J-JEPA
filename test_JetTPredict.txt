@@ -1,0 +1,84 @@
+Testing JetTransformerPredictor
+======================================================================
+Options
+----------------------------------------------------------------------
+activation                      : gelu
+attn_drop_rate                  : 0.0
+batch_size                      : 4096
+checkpoint_freq                 : 10
+drop_path_rate                  : 0.0
+dropout                         : 0.0
+ema                             : [0.996, 0.999]
+emb_dim                         : 512
+embedding_skip_connections      : True
+event_info_file                 : 
+init_std                        : 0.02
+initial_embedding_dim           : 256
+initial_embedding_skip_connections: False
+learning_rate                   : 0.001
+linear_block_type               : basic
+min_lr                          : 1e-06
+mlp_ratio                       : 4.0
+normalization                   : LayerNorm
+num_context_subjets             : 10
+num_embedding_layers            : 10
+num_epochs                      : 100
+num_heads                       : 8
+num_jets                        : 100000
+num_layers                      : 6
+num_part_ftr                    : 4
+num_particles                   : 30
+num_subjets                     : 20
+num_workers                     : 4
+optimizer                       : AdamW
+pred_depth                      : 3
+qk_scale                        : None
+qkv_bias                        : True
+repr_dim                        : 1024
+scheduler                       : cosine
+skip_connections                : True
+start_epochs                    : 0
+testing_file                    : 
+training_file                   : 
+use_amp                         : True
+validation_file                 : 
+warmup_epochs                   : 10
+warmup_start_lr                 : 1e-08
+weight_decay                    : 0.01
+======================================================================
+Initializing JetsTransformerPredictor module
+Initializing Block module
+Initializing Attention module
+Initializing MLP module
+Initializing Block module
+Initializing Attention module
+Initializing MLP module
+Initializing Block module
+Initializing Attention module
+Initializing MLP module
+JetsTransformerPredictor forward pass with input shape: torch.Size([100, 8, 1024])
+torch.Size([100, 8, 512])
+torch.Size([100, 2, 512])
+Block forward pass with input shape: torch.Size([200, 9, 1024])
+Attention forward pass with input shape: torch.Size([200, 9, 1024])
+num_heads:  8
+Attention output shape: torch.Size([200, 9, 1024])
+MLP forward pass with input shape: torch.Size([200, 9, 1024])
+MLP output shape: torch.Size([200, 9, 1024])
+Block output shape: torch.Size([200, 9, 1024])
+Block forward pass with input shape: torch.Size([200, 9, 1024])
+Attention forward pass with input shape: torch.Size([200, 9, 1024])
+num_heads:  8
+Attention output shape: torch.Size([200, 9, 1024])
+MLP forward pass with input shape: torch.Size([200, 9, 1024])
+MLP output shape: torch.Size([200, 9, 1024])
+Block output shape: torch.Size([200, 9, 1024])
+Block forward pass with input shape: torch.Size([200, 9, 1024])
+Attention forward pass with input shape: torch.Size([200, 9, 1024])
+num_heads:  8
+Attention output shape: torch.Size([200, 9, 1024])
+MLP forward pass with input shape: torch.Size([200, 9, 1024])
+MLP output shape: torch.Size([200, 9, 1024])
+Block output shape: torch.Size([200, 9, 1024])
+JetsTransformerPredictor output shape: torch.Size([200, 1, 1024])
+torch.Size([100, 2, 1024])
