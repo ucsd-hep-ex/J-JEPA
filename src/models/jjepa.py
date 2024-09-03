@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from src.layers.embedding_stack import EmbeddingStack
 from src.util.positional_embedding import create_pos_emb_fn
 from src.options import Options
+from src.util.tensors import trunc_normal_
 
 
 class Attention(nn.Module):
@@ -179,9 +180,9 @@ class JetsTransformer(nn.Module):
         """
         Inputs:
             x: particles of subjets
-                shape: [bs, N_sj, N_part, N_part_ftr]
-            subjet_ftrs: 4 vec of subjets
-                shape: [bs, N_sj, N_sj_ftr=5]
+                shape: [B, N_sj, N_part, N_part_ftr]
+            subjet_meta: 4 vec of subjets
+                shape: [B, N_sj, N_sj_ftr=5]
                 N_sj_ftr: pt, eta, phi, E, num_part
         Return:
             subjet representations
@@ -209,46 +210,37 @@ class JetsTransformer(nn.Module):
 
 
 class JetsTransformerPredictor(nn.Module):
-    def __init__(
-        self,
-        num_features,
-        embed_dim,
-        predictor_embed_dim,
-        depth,
-        num_heads,
-        mlp_ratio,
-        qkv_bias=True,
-        qk_scale=None,
-        drop_rate=0.0,
-        attn_drop_rate=0.0,
-        drop_path_rate=0.0,
-        norm_layer=nn.LayerNorm,
-    ):
+
+    def __init__(self, options: Options, norm_layer=nn.LayerNorm):
         super().__init__()
         print("Initializing JetsTransformerPredictor module")
-        self.predictor_embed = nn.Linear(embed_dim, predictor_embed_dim, bias=True)
-        self.calc_predictor_pos_emb = create_pos_emb_fn(predictor_embed_dim)
+        self.init_std = options.init_std
+        self.predictor_embed = nn.Linear(options.repr_dim, options.repr_dim, bias=True)
+        self.calc_predictor_pos_emb = create_pos_emb_fn(options.repr_dim)
         self.predictor_blocks = nn.ModuleList(
             [
                 Block(
-                    dim=predictor_embed_dim,
-                    num_heads=num_heads,
-                    mlp_ratio=mlp_ratio,
-                    qkv_bias=qkv_bias,
-                    qk_scale=qk_scale,
-                    drop=drop_rate,
-                    attn_drop=attn_drop_rate,
-                    drop_path=drop_path_rate,
+                    dim=options.repr_dim,
+                    num_heads=options.num_heads,
+                    mlp_ratio=options.mlp_ratio,
+                    qkv_bias=options.qkv_bias,
+                    qk_scale=options.qk_scale,
+                    drop=options.dropout,
+                    attn_drop=options.attn_drop_rate,
+                    drop_path=options.drop_path_rate,
                     norm_layer=norm_layer,
                 )
-                for i in range(depth)
+                for _ in range(options.pred_depth)
             ]
         )
-        self.predictor_norm = norm_layer(predictor_embed_dim)
+        self.predictor_norm = norm_layer(options.repr_dim)
+        # TODO: figure out predictor_output_dim
         self.predictor_proj = nn.Linear(
-            predictor_embed_dim, 8 * 30, bias=True
+            options.repr_dim, options.repr_dim, bias=True
         )  # Match target dimensions
         self.apply(self._init_weights)
+        self.mask_token = nn.Parameter(torch.zeros(1, 1, options.repr_dim))
+        trunc_normal_(self.mask_token, std=self.init_std)
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
@@ -259,24 +251,54 @@ class JetsTransformerPredictor(nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
-    def forward(self, x, masks_x, context_subjet_ftrs, target_subjet_ftrs):
+    def forward(self, x, subjet_mask, target_subjet_ftrs, context_subjet_ftrs):
+        """
+        Inputs:
+            x: context subjet representations
+                shape: [B, N_ctxt, emb_dim]
+            subjet_mask: mask for zero-padded subjets
+                shape: [B, N_ctxt]
+            target_subjet_ftrs: target subjet features
+                shape: [B, N_trgt, N_ftr]
+            context_subjet_ftrs: context subjet features
+                shape: [B, N_ctxt, N_ftr]
+        Output:
+            predicted target subjet representations
+                shape: [B, N_trgt, predictor_output_dim]
+        """
         print(f"JetsTransformerPredictor forward pass with input shape: {x.shape}")
         # calcualte context positional embedding
         x = self.predictor_embed(x)
         x += self.calc_predictor_pos_emb(context_subjet_ftrs)
 
-        # concat conditional jet token to x
+        B, N_ctxt, D = x.shape
+        _, N_trgt, _ = target_subjet_ftrs.shape
+        # prepare position embeddings for target subjets
+        # (B, N_trgt, N_ftr) -> (B, N_trgt, D)
+        trgt_pos_emb = self.calc_predictor_pos_emb(target_subjet_ftrs)
+        assert trgt_pos_emb.shape[2] == D
+        # (B, N_trgt, D) -> (B*N_trgt, 1, D) following FAIR_src
+        trgt_pos_emb = trgt_pos_emb.view(B * N_trgt, 1, D)
         # TODO: add an learnable token
-        pred_token = self.calc_predictor_pos_emb(target_subjet_ftrs)
+        pred_token = self.mask_token.repeat(
+            trgt_pos_emb.size(0), trgt_pos_emb.size(1), 1
+        )
+        pred_token += trgt_pos_emb
 
-        # TODO: repeat?
+        # (B, N_ctxt, D) -> (B * N_trgt, N_ctxt, D)
+        x = x.repeat(N_trgt, 1, 1)
+
         x = torch.cat([x, pred_token], axis=1)
 
         for blk in self.predictor_blocks:
             x = blk(x)
+        x = self.predictor_norm(x)
+
+        # -- return the preds for target subjets
+        x = x[:, N_ctxt:, :]
         x = self.predictor_proj(x)
         print(f"JetsTransformerPredictor output shape: {x.shape}")
-        return x.view(x.size(0), x.size(1), 8, 30)  # Reshape to match target_repr shape
+        return x.view(B, N_trgt, -1)
 
 
 class JJEPA(nn.Module):
@@ -305,14 +327,14 @@ class JJEPA(nn.Module):
             self.predictor_transformer = JetsTransformerPredictor(
                 num_features=input_dim,
                 embed_dim=embed_dim,
-                predictor_embed_dim=embed_dim // 2,
+                repr_dim=embed_dim // 2,
                 depth=depth,
                 num_heads=num_heads,
                 mlp_ratio=mlp_ratio,
                 drop_rate=dropout,
             )
 
-        # Debug Statement - Dimension check
+        # Debug Statement - TODO: Implement Dimension check
         self.input_check = DimensionCheckLayer("Model Input", 3)
         self.context_check = DimensionCheckLayer("After Context Transformer", 3)
         self.predictor_check = DimensionCheckLayer("After Predictor", 3)
