@@ -1,10 +1,3 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-#
-# This source code is licensed under the license found in the
-# LICENSE file in the root directory of this source tree.
-#
-
 import math
 
 import torch
@@ -12,6 +5,7 @@ import torch
 from logging import getLogger
 
 logger = getLogger()
+# Cut & paste from https://github.com/facebookresearch/ijepa/blob/main/src/utils/tensors.py
 
 
 def _no_grad_trunc_normal_(tensor, mean, std, a, b):
@@ -48,27 +42,3 @@ def _no_grad_trunc_normal_(tensor, mean, std, a, b):
 def trunc_normal_(tensor, mean=0.0, std=1.0, a=-2.0, b=2.0):
     # type: (Tensor, float, float, float, float) -> Tensor
     return _no_grad_trunc_normal_(tensor, mean, std, a, b)
-
-
-def apply_masks(x, masks):
-    """
-    :param x: tensor of shape [B (batch-size), N (num-patches), D (feature-dim)]
-    :param masks: list of tensors containing indices of patches in [N] to keep
-    """
-    all_x = []
-    for m in masks:
-        mask_keep = m.unsqueeze(-1).repeat(1, 1, x.size(-1))
-        all_x += [torch.gather(x, dim=1, index=mask_keep)]
-    return torch.cat(all_x, dim=0)
-
-
-def repeat_interleave_batch(x, B, repeat):
-    N = len(x) // B  # len(masks_x)
-    x = torch.cat(
-        [
-            torch.cat([x[i * B : (i + 1) * B] for _ in range(repeat)], dim=0)
-            for i in range(N)
-        ],
-        dim=0,
-    )
-    return x
