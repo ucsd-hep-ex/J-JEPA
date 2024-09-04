@@ -91,7 +91,7 @@ class Options(Namespace):
         # qk_scale applied to attention layers.
         self.qk_scale: float = None
 
-        self.attn_dim: int = 64
+        self.attn_dim: int = 512
 
         # Number of features in the hidden layers in MLP.
         self.hidden_features: int = 512
@@ -241,7 +241,6 @@ class Options(Namespace):
 
         # number of steps per epoch
         self.num_steps_per_epoch: int = self.num_jets // self.batch_size
-
 
     def display(self):
         try:
