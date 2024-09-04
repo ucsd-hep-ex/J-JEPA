@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from src.layers.embedding_stack import EmbeddingStack
+from src.layers.embedding_stack import EmbeddingStack, PredictorEmbeddingStack
 from src.util.positional_embedding import create_pos_emb_fn
 from src.options import Options
 from src.util.tensors import trunc_normal_
@@ -69,7 +69,7 @@ class MLP(nn.Module):
         print("Initializing MLP module")
         act_layer = ACTIVATION_LAYERS.get(options.activation, nn.GELU)
         out_features = options.out_features or options.in_features
-        hidden_features = hidden_features or options.in_features
+        hidden_features = options.hidden_features or options.in_features
         self.fc1 = nn.Linear(options.in_features, hidden_features)
         self.act = act_layer()
         self.fc2 = nn.Linear(hidden_features, out_features)
@@ -94,25 +94,13 @@ class Block(nn.Module):
         norm_layer = NORM_LAYERS.get(options.normalization, nn.LayerNorm)
         self.norm1 = norm_layer(options.attn_dim)
         self.dim = options.attn_dim
-        self.attn = Attention(
-            self.dim,
-            num_heads=options.num_heads,
-            qkv_bias=options.qkv_bias,
-            qk_scale=options.qk_scale,
-            attn_drop=options.attn_drop,
-            proj_drop=options.proj_drop,
-        )
+        self.attn = Attention(options)
         self.drop_path = (
             nn.Identity() if options.drop_path <= 0 else nn.Dropout(options.drop_path)
         )
         self.norm2 = norm_layer(self.dim)
         mlp_hidden_dim = int(self.dim * options.mlp_ratio)
-        self.mlp = MLP(
-            in_features=self.dim,
-            hidden_features=mlp_hidden_dim,
-            act_layer=act_layer,
-            drop=options.drop_mlp,
-        )
+        self.mlp = MLP(options)
 
     def forward(self, x):
         print(f"Block forward pass with input shape: {x.shape}")
@@ -133,23 +121,12 @@ class JetsTransformer(nn.Module):
         self.calc_pos_emb = create_pos_emb_fn(options.emb_dim)
 
         # Adjust the input dimensions based on the new input shape
-        self.subjet_emb = nn.Linear(
-            options.num_particles * options.num_part_ftr, options.emb_dim
-        )  # num_features * subjet_length
+        self.subjet_emb = EmbeddingStack(options,
+                                         options.num_particles * options.num_part_ftr)
 
         self.blocks = nn.ModuleList(
             [
-                Block(
-                    dim=options.emb_dim,
-                    num_heads=options.num_heads,
-                    mlp_ratio=options.mlp_ratio,
-                    qkv_bias=options.qkv_bias,
-                    qk_scale=options.qk_scale,
-                    drop=options.dropout,
-                    attn_drop=options.attn_drop,
-                    drop_path=options.drop_path,
-                    norm_layer=norm_layer,
-                )
+                Block(options)
                 for i in range(options.encoder_depth)
             ]
         )
@@ -205,6 +182,8 @@ class JetsTransformerPredictor(nn.Module):
         norm_layer = NORM_LAYERS.get(options.normalization, nn.LayerNorm)
         self.init_std = options.init_std
         self.predictor_embed = nn.Linear(options.repr_dim, options.repr_dim, bias=True)
+        self.predictor_subjet_emb = PredictorEmbeddingStack(options,
+                                                   input_dim = options.num_particles * options.num_part_ftr)
         self.calc_predictor_pos_emb = create_pos_emb_fn(options.repr_dim)
         self.predictor_blocks = nn.ModuleList(
             [
@@ -240,7 +219,7 @@ class JetsTransformerPredictor(nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
-    def forward(self, x, subjet_mask, target_subjet_ftrs, context_subjet_ftrs):
+    def forward(self, x, subjet_masks, target_subjet_ftrs, context_subjet_ftrs):
         """
         Inputs:
             x: context subjet representations

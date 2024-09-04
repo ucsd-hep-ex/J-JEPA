@@ -12,19 +12,18 @@ if __name__ == "__main__":
     print("Testing embedding stack layer")
 
     options = Options()
-    options.load("src/test_options.json")
     options.display()
 
     jetT = JetsTransformer(
         options,
-        depth=12,
-        num_heads=8,
-        mlp_ratio=4.0,
-        qkv_bias=True,
-        qk_scale=None,
-        attn_drop_rate=0.0,
-        drop_path_rate=0.0,
-        norm_layer=nn.LayerNorm,
+        # depth=12,
+        # num_heads=8,
+        # mlp_ratio=4.0,
+        # qkv_bias=True,
+        # qk_scale=None,
+        # attn_drop_rate=0.0,
+        # drop_path_rate=0.0,
+        # norm_layer=nn.LayerNorm,
     )
 
     # set a pseudo input
