@@ -353,7 +353,7 @@ class VisionTransformerPredictor(nn.Module):
 
     def forward(self, x, masks_x, masks):
         """
-        x: context representations
+        x: context representations, output of context encoder
         masks_x: masks for context blocks
         masks: masks for target blocks
         """
@@ -367,7 +367,7 @@ class VisionTransformerPredictor(nn.Module):
         if not isinstance(masks, list):
             masks = [masks]
 
-        # -- Batch Size
+        # --
         B = len(x) // len(masks_x)
 
         # -- map from encoder-dim to pedictor-dim
@@ -386,17 +386,20 @@ class VisionTransformerPredictor(nn.Module):
         )  # (B, num_patches, predictor_embed_dim)
         pos_embs = apply_masks(
             pos_embs, masks
-        )  # (B * len(masks), len(individual_mask), predictor_embed_dim)
+        )  # (B * len(masks), len(individual_target_mask), predictor_embed_dim)
         pos_embs = repeat_interleave_batch(
             pos_embs, B, repeat=len(masks_x)
         )  # (B * len(masks) * len(masks_x), len(individual_mask), predictor_embed_dim)
         # -- to match the shape of pos_embs
         pred_tokens = self.mask_token.repeat(pos_embs.size(0), pos_embs.size(1), 1)
-        # --
+        # -- to make pos_embs learnable
         pred_tokens += pos_embs
         x = x.repeat(len(masks), 1, 1)
-        x = torch.cat([x, pred_tokens], dim=1)
+        x = torch.cat(
+            [x, pred_tokens], dim=1
+        )  # (B * len(masks), N_ctxt + len(individual_target_mask), predictor_embed_dim)
 
+        # B * len(masks) * len(masks_x) = len(x) * len(masks)
         # -- fwd prop
         for blk in self.predictor_blocks:
             x = blk(x)
