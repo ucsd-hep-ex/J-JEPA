@@ -1,30 +1,99 @@
-def check_processed_data(processed_subjets, batch_index=0):
-    print(f"\n--- Checking Processed Data for Batch Item {batch_index} ---")
-    print(f"Processed shape: {processed_subjets.shape}")
-    if len(processed_subjets.shape) == 3:
-        num_subjets, num_features, subjet_length = processed_subjets.shape
-        print(f"Number of subjets: {num_subjets}")
-        print(f"Number of features: {num_features}")
-        print(f"Subjet length: {subjet_length}")
-        print("\nFirst few values of each feature:")
-        for i in range(num_features):
-            print(f"Feature {i}: {processed_subjets[0, i, :5]}")
-    else:
-        print("Unexpected shape for processed subjets")
+import os
+import sys
+import logging
+import argparse
+import yaml
+from pathlib import Path
 
-def create_random_masks(batch_size, num_subjets, num_features, subjet_length, context_scale=0.7):
-    print(f"Creating random masks with batch_size={batch_size}, num_subjets={num_subjets}")
+import numpy as np
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
+from torch.utils.data import DataLoader
+from torch.nn.parallel import DistributedDataParallel
+from torch.amp import GradScaler, autocast
+import torch.distributed as dist
+import time
+
+from options import Options
+from models.jjepa import JJEPA
+from dataset.JEPADataset import JEPADataset
+
+# Set up basic logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Train JJEPA model")
+    parser.add_argument("--config", type=str, required=True, help="Path to config JSON file")
+    parser.add_argument("--data_path", type=str, required=True, help="Path to dataset")
+    parser.add_argument("--output_dir", type=str, default="output", help="Output directory")
+    return parser.parse_args()
+
+def setup_environment(rank):
+    os.environ['MASTER_ADDR'] = 'localhost'
+    os.environ['MASTER_PORT'] = '12355'
+    if torch.cuda.is_available():
+        torch.cuda.set_device(rank)
+    torch.distributed.init_process_group(backend='nccl', init_method='env://')
+
+def setup_model(options, device):
+    model = JJEPA(
+        options=options,
+        input_dim=options.num_part_ftr * options.num_particles,
+        embed_dim=options.emb_dim,
+        depth=options.num_layers,
+        num_heads=options.num_heads,
+        mlp_ratio=options.mlp_ratio,
+        dropout=options.dropout,
+        use_predictor=True
+    ).to(device)
+    
+    target_encoder = JJEPA(
+        options=options,
+        input_dim=options.num_part_ftr * options.num_particles,
+        embed_dim=options.emb_dim,
+        depth=options.num_layers,
+        num_heads=options.num_heads,
+        mlp_ratio=options.mlp_ratio,
+        dropout=options.dropout,
+        use_predictor=False
+    ).to(device)
+    
+    for p in target_encoder.parameters():
+        p.requires_grad = False
+    
+    return model, target_encoder
+
+def setup_data_loader(options, data_path, world_size, rank):
+    dataset = JEPADataset(data_path, num_jets=options.num_jets)
+    sampler = torch.utils.data.distributed.DistributedSampler(
+        dataset, num_replicas=world_size, rank=rank, shuffle=True
+    )
+    loader = DataLoader(
+        dataset, 
+        batch_size=options.batch_size, 
+        shuffle=False,
+        num_workers=options.num_workers,
+        pin_memory=True,
+        sampler=sampler
+    )
+    return loader, sampler
+
+def create_random_masks(batch_size, num_subjets, num_features, subjet_length, device, context_scale=0.7):
     context_masks = []
     target_masks = []
 
-    for i in range(batch_size):
-        indices = torch.randperm(num_subjets)
+    for _ in range(batch_size):
+        indices = torch.randperm(num_subjets, device=device)
         context_size = int(num_subjets * context_scale)
         context_indices = indices[:context_size]
         target_indices = indices[context_size:]
 
-        context_mask = torch.zeros(num_subjets, num_features, subjet_length)
-        target_mask = torch.zeros(num_subjets, num_features, subjet_length)
+        context_mask = torch.zeros(num_subjets, num_features, subjet_length, device=device)
+        target_mask = torch.zeros(num_subjets, num_features, subjet_length, device=device)
 
         context_mask[context_indices] = 1
         target_mask[target_indices] = 1
@@ -34,116 +103,188 @@ def create_random_masks(batch_size, num_subjets, num_features, subjet_length, co
 
     return torch.stack(context_masks), torch.stack(target_masks)
 
-def train_step(model, particles, subjets, subjet_masks, particle_masks, optimizer, device, step):
-    print(f"\nStarting training step {step}")
-    
-    # Debug Statement
-    # check_processed_data(sjs)
+def save_checkpoint(model, target_encoder, optimizer, epoch, loss, output_dir):
+    checkpoint = {
+        'model': model.state_dict(),
+        'target_encoder': target_encoder.state_dict(),
+        'optimizer': optimizer.state_dict(),
+        'epoch': epoch,
+        'loss': loss
+    }
+    torch.save(checkpoint, os.path.join(output_dir, f'checkpoint_epoch_{epoch + 1}.pth'))
 
-    # represent subjets in terms of particles
-    particle_indices = 
-    subjet_particles = particles[:, :, particle_indices[0, subjet_idx].long()]
+def setup_logging(rank, output_dir):
+    log_file = Path(output_dir) / f"train_rank_{rank}.log"
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_file),
+            logging.StreamHandler()
+        ]
+    )
+
+class AverageMeter(object):
+    """Computes and stores the average and current value"""
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.val = 0
+        self.avg = 0
+        self.sum = 0
+        self.count = 0
+
+    def update(self, val, n=1):
+        self.val = val
+        self.sum += val * n
+        self.count += n
+        self.avg = self.sum / self.count
+
+# momentum scheduler
+def create_momentum_scheduler(options):
+    return cosine_scheduler(options.base_momentum, 1, options.num_epochs, options.num_steps_per_epoch)
+
+def cosine_scheduler(base_value, final_value, epochs, niter_per_ep, warmup_epochs=0, start_warmup_value=0):
+    warmup_schedule = np.array([])
+    warmup_iters = warmup_epochs * niter_per_ep
+    if warmup_epochs > 0:
+        warmup_schedule = np.linspace(start_warmup_value, base_value, warmup_iters)
+
+    iters = np.arange(epochs * niter_per_ep - warmup_iters)
+    schedule = final_value + 0.5 * (base_value - final_value) * (1 + np.cos(np.pi * iters / len(iters)))
+
+    schedule = np.concatenate((warmup_schedule, schedule))
+    assert len(schedule) == epochs * niter_per_ep
+    return iter(schedule)
+
+def gpu_timer(closure):
+    if torch.cuda.is_available():
+        start = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
+        start.record()
+    else:
+        start = time.time()
+
+    result = closure()
+
+    if torch.cuda.is_available():
+        end.record()
+        torch.cuda.synchronize()
+        elapsed_time = start.elapsed_time(end)
+    else:
+        elapsed_time = (time.time() - start) * 1000  # Convert to milliseconds
+
+    return result, elapsed_time
+
+def grad_logger(named_parameters):
+    grad_stats = {}
+    for name, param in named_parameters:
+        if param.grad is not None:
+            grad_stats[name] = param.grad.norm().item()
+    return grad_stats
+
+def repeat_interleave_batch(tensor, batch_size, repeat):
+    return tensor.repeat_interleave(repeat, dim=0)
+
+def main(rank, world_size, args):
+    if world_size > 1:
+        setup_environment(rank)
+    device = torch.device(f'cuda:{rank}' if torch.cuda.is_available() else 'cpu')
+    options = Options()
+    options.load(args.config)
+    setup_logging(rank, args.output_dir)
+    logger.info(f'Initialized (rank/world-size) {rank}/{world_size}')
     
-    batch_size, num_subjets, num_features, subjet_length = subjets.size()
-    print(f"Input shapes - Subjets: {subjets.shape}, Subjet masks: {subjet_masks.shape}, Particle masks: {particle_masks.shape}")
-    
-    context_masks, target_masks = create_random_masks(batch_size, num_subjets, num_features, subjet_length)
-    print(f"Context masks shape: {context_masks.shape}, Target masks shape: {target_masks.shape}")
-    
-    context_masks = context_masks.to(device)
-    target_masks = target_masks.to(device)
-    subjet_masks = subjet_masks.to(device)
-    particle_masks = particle_masks.to(device)
-    
-    context_subjets = subjets * context_masks
-    target_subjets = subjets * target_masks
-    
-    optimizer.zero_grad()
-    
-    print("Forwarding through model")
-    pred_repr, context_repr, target_repr = model(context_subjets, target_subjets)
-    
-    print(f"Predicted representation shape: {pred_repr.shape}")
-    print(f"Target representation shape: {target_repr.shape}")
-    
-    combined_mask = target_masks.to(device) * subjet_masks.unsqueeze(-1).unsqueeze(-1).expand_as(target_masks).to(device)
-    
-    pred_repr = pred_repr.to(device)
-    target_repr = target_repr.to(device)
-    
-    print("Calculating loss")
-    loss = F.mse_loss(pred_repr * combined_mask, target_repr * combined_mask)
-    print(f"Calculated loss: {loss.item()}")
-    
-    loss.backward()
-    optimizer.step()
-    
-    if step % 500 == 0:
-        print_jet_details(pred_repr[0].cpu(), "Predicted")
-        visualize_predictions_vs_ground_truth(subjets[0].cpu(), pred_repr[0].cpu(), title=f"Ground Truth vs Predictions (Step {step})")
-        print(f"Context representation shape: {context_repr.shape}")
-        print(f"Target representation shape: {target_repr.shape}")
-        
-    return loss.item()
+    model, target_encoder = setup_model(options, device)
+    if world_size > 1:
+        model = DistributedDataParallel(model, device_ids=[rank])
+        target_encoder = DistributedDataParallel(target_encoder, device_ids=[rank])
+
+    train_loader, train_sampler = setup_data_loader(options, args.data_path, world_size, rank)
+
+    optimizer = optim.AdamW(model.parameters(), lr=options.lr)
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=options.num_epochs)
+    scaler = GradScaler()
+
+    momentum_scheduler = create_momentum_scheduler(options)
+
+    for epoch in range(options.start_epochs, options.num_epochs):
+        logger.info('Epoch %d' % (epoch + 1))
+
+        if train_sampler:
+            train_sampler.set_epoch(epoch)
+
+        loss_meter = AverageMeter()
+        time_meter = AverageMeter()
+
+        for itr, (x, particle_features, subjets, particle_indices, subjet_mask, particle_mask) in enumerate(train_loader):
+            x = x.to(device, non_blocking=True)
+            particle_features = particle_features.to(device, non_blocking=True)
+            subjets = subjets.to(device, non_blocking=True)
+            particle_indices = particle_indices.to(device, non_blocking=True)
+            subjet_mask = subjet_mask.to(device, non_blocking=True)
+            particle_mask = particle_mask.to(device, non_blocking=True)
+            
+            masks_enc, masks_pred = create_random_masks(
+                options.batch_size, 
+                options.num_subjets, 
+                options.num_part_ftr, 
+                options.num_particles,
+                device
+            )
+
+            def train_step():
+                optimizer.zero_grad()
+
+                def forward_target():
+                    with torch.no_grad():
+                        h = target_encoder(x, subjets)
+                        h = F.layer_norm(h, (h.size(-1),))
+                        h = repeat_interleave_batch(h, len(h), repeat=len(masks_enc))
+                    return h
+
+                def forward_context():
+                    z = model(x, subjets, masks_enc, masks_pred)
+                    return z
+
+                h = forward_target()
+                z = forward_context()
+
+                loss = F.smooth_l1_loss(z, h)
+
+                if options.use_amp:
+                    scaler.scale(loss).backward()
+                    scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), options.max_grad_norm)
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), options.max_grad_norm)
+                    optimizer.step()
+
+                with torch.no_grad():
+                    m = next(momentum_scheduler)
+                    for param_q, param_k in zip(model.parameters(), target_encoder.parameters()):
+                        param_k.data.mul_(m).add_((1.-m) * param_q.detach().data)
+
+                return float(loss)
+
+            loss, etime = gpu_timer(train_step)
+            loss_meter.update(loss)
+            time_meter.update(etime)
+
+            if itr % options.log_freq == 0:
+                logger.info(f'[{epoch + 1}, {itr}] loss: {loss_meter.avg:.3f} ({time_meter.avg:.1f} ms)')
+
+        scheduler.step()
+        save_checkpoint(model, target_encoder, optimizer, epoch, loss_meter.avg, args.output_dir)
 
 if __name__ == "__main__":
-    print("Starting main program")
-    
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"Using device: {device}")
-
-    with open('config.yaml', 'r') as file:
-        config = yaml.safe_load(file)
-        
-    try:
-        print("Loading dataset")
-        train_dataset = JetDataset("../data/val/val_20_30.h5", subset_size=1000, config=config)
-    except Exception as e:
-        print(f"Error loading dataset: {e}")
-
-    print("Creating DataLoader")
-    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, collate_fn=custom_collate_fn)
-
-    print("Initializing model")
-    model = JJEPA(input_dim=240, embed_dim=512, depth=12, num_heads=8, mlp_ratio=4.0, dropout=0.1).to(device)
-    optimizer = optim.AdamW(model.parameters(), lr=1e-4, weight_decay=0.04)
-
-    num_epochs = 10
-    train_losses = []
-    
-    print(f"Starting training for {num_epochs} epochs")
-    for epoch in range(num_epochs):
-        model.train()
-        total_loss = 0
-        progress_bar = tqdm(total=len(train_loader), desc=f"Epoch {epoch+1}/{num_epochs}", leave=True, position=0)
-    
-        for step, (particle_features, subjet_features, particle_indices, subjet_mask, particle_mask) in enumerate(train_loader):
-            subjet_particles = particle_features[:, :, particle_indices]
-            features = features.to(device)
-            subjets = subjets.to(device)
-            subjet_masks = subjet_masks.to(device)
-            particle_masks = particle_masks.to(device)
-            
-            loss = train_step(model, subjets, subjet_masks, particle_masks, optimizer, device, step)
-            total_loss += loss
-            
-            progress_bar.set_postfix(loss=loss)
-            progress_bar.update(1)
-            
-            if step % 100 == 0:
-                print(f"\nEpoch {epoch+1}, Step {step}, Loss: {loss:.4f}")
-        
-        progress_bar.close()
-
-        avg_train_loss = total_loss / len(train_loader)
-        train_losses.append(avg_train_loss)
-        print(f"Epoch {epoch+1}/{num_epochs}, Training Loss: {avg_train_loss:.4f}")
-
-    print("Training completed")
-    print("Visualizing training loss")
-    visualize_training_loss(train_losses)
-
-    print("Saving model")
-    torch.save(model.state_dict(), 'ijepa_model.pth')
-
-    print("Model saved.")
+    args = parse_args()
+    world_size = torch.cuda.device_count()
+    if world_size > 1:
+        torch.multiprocessing.spawn(main, args=(world_size, args), nprocs=world_size, join=True)
+    else:
+        main(0, 1, args)
