@@ -45,6 +45,7 @@ class Options(Namespace):
         # later embedding layers
         # embedding dimension size
         self.emb_dim: int = 512
+        self.predictor_emb_dim = 1024
 
         # whether to add skip connections to the later embedding layers
         self.embedding_skip_connections: bool = True
