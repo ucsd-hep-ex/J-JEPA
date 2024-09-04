@@ -245,6 +245,9 @@ class Options(Namespace):
         # number of steps per epoch
         self.log_freq: int = 10
 
+        # debug mode
+        self.debug: bool = False
+
     def display(self):
         try:
             from rich import get_console
