@@ -26,9 +26,14 @@ class Options(Namespace):
         # number of particle features per particle
         self.num_part_ftr: int = 4
 
+        self.input_dim: int = self.num_particles * self.num_part_ftr
+
         # =========================================================================================
         # Network Architecture
         # =========================================================================================
+
+        # Use predictor
+        self.use_predictor: bool = True
 
         # initial embeddings
         # initial embedding layer size
@@ -53,6 +58,15 @@ class Options(Namespace):
         self.num_embedding_layers: int = 10
 
         # Activation function for all transformer layers, 'relu' or 'gelu'.
+        """
+        ACTIVATION_LAYERS = {
+        "relu": nn.ReLU,
+        "gelu": nn.GELU,
+        "LeakyRelU": nn.LeakyReLU,
+        "SELU": nn.SELU,
+        }
+        default is gelu
+        """
         self.activation: str = "gelu"
 
         # Whether or not to add skip connections to internal linear layers.
@@ -63,10 +77,13 @@ class Options(Namespace):
         self.dropout: float = 0.0
 
         # Attention dropout added to attention layers.
-        self.attn_drop_rate: float = 0.0
+        self.attn_drop: float = 0.0
 
         # Drop path rate applied to linear layers.
-        self.drop_path_rate: float = 0.0
+        self.drop_path: float = 0.0
+
+        # Drop path rate applied to projector in attention layers.
+        self.proj_drop: float = 0.0
 
         # qkv_bias added to attention layers.
         self.qkv_bias: bool = True
@@ -74,7 +91,19 @@ class Options(Namespace):
         # qk_scale applied to attention layers.
         self.qk_scale: float = None
 
-        #
+        self.attn_dim: int = 64
+
+        # Number of features in the hidden layers in MLP.
+        self.hidden_features: int = 512
+
+        # Number of input features in MLP.
+        self.in_features: int = 512
+
+        # Number of output features in MLP.
+        self.out_features: int = 512
+
+        # drop rate for the MLP
+        self.drop_mlp: float = 0.0
 
         # Whether or not to apply a normalization layer during linear / embedding layers.
         #
@@ -84,6 +113,15 @@ class Options(Namespace):
         # BatchNorm
         # LayerNorm
         # MaskedBatchNorm
+        """
+        NORM_LAYERS = {
+            "None": None,
+            "BatchNorm": nn.BatchNorm1d,
+            "LayerNorm": nn.LayerNorm,
+            "MaskedBatchNorm": None,
+        }
+        default is None
+        """
         # -------------------------------------------------
         self.normalization: str = "LayerNorm"
 
@@ -98,6 +136,9 @@ class Options(Namespace):
 
         # Number of subjets to use as context
         self.num_context_subjets: int = 10
+
+        # Depth of the encoder network
+        self.encoder_depth: int = 3
 
         # Depth of the predictor network
         self.pred_depth: int = 3
