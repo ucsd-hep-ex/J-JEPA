@@ -4,7 +4,13 @@ from typing import Union, Dict, Any
 
 
 class Options(Namespace):
-    def __init__(self, event_info_file: str = "", training_file: str = "", validation_file: str = "", testing_file: str = ""):
+    def __init__(
+        self,
+        event_info_file: str = "",
+        training_file: str = "",
+        validation_file: str = "",
+        testing_file: str = "",
+    ):
         super(Options, self).__init__()
 
         # =========================================================================================
@@ -20,9 +26,14 @@ class Options(Namespace):
         # number of particle features per particle
         self.num_part_ftr: int = 4
 
+        self.input_dim: int = self.num_particles * self.num_part_ftr
+
         # =========================================================================================
         # Network Architecture
         # =========================================================================================
+
+        # Use predictor
+        self.use_predictor: bool = True
 
         # initial embeddings
         # initial embedding layer size
@@ -39,7 +50,7 @@ class Options(Namespace):
         self.embedding_skip_connections: bool = True
 
         # linear block type:
-        self.linear_block_type: str = 'basic'
+        self.linear_block_type: str = "basic"
 
         # Maximum Number of double-sized embedding layers to add between the features and the encoder.
         # The size of the embedding dimension will be capped at the hidden_dim,
@@ -47,7 +58,16 @@ class Options(Namespace):
         self.num_embedding_layers: int = 10
 
         # Activation function for all transformer layers, 'relu' or 'gelu'.
-        self.activation: str = 'gelu'
+        """
+        ACTIVATION_LAYERS = {
+        "relu": nn.ReLU,
+        "gelu": nn.GELU,
+        "LeakyRelU": nn.LeakyReLU,
+        "SELU": nn.SELU,
+        }
+        default is gelu
+        """
+        self.activation: str = "gelu"
 
         # Whether or not to add skip connections to internal linear layers.
         # All layers support skip connections, this can turn them off.
@@ -55,6 +75,35 @@ class Options(Namespace):
 
         # Dropout added to all layers.
         self.dropout: float = 0.0
+
+        # Attention dropout added to attention layers.
+        self.attn_drop: float = 0.0
+
+        # Drop path rate applied to linear layers.
+        self.drop_path: float = 0.0
+
+        # Drop path rate applied to projector in attention layers.
+        self.proj_drop: float = 0.0
+
+        # qkv_bias added to attention layers.
+        self.qkv_bias: bool = True
+
+        # qk_scale applied to attention layers.
+        self.qk_scale: float = None
+
+        self.attn_dim: int = 64
+
+        # Number of features in the hidden layers in MLP.
+        self.hidden_features: int = 512
+
+        # Number of input features in MLP.
+        self.in_features: int = 512
+
+        # Number of output features in MLP.
+        self.out_features: int = 512
+
+        # drop rate for the MLP
+        self.drop_mlp: float = 0.0
 
         # Whether or not to apply a normalization layer during linear / embedding layers.
         #
@@ -64,6 +113,15 @@ class Options(Namespace):
         # BatchNorm
         # LayerNorm
         # MaskedBatchNorm
+        """
+        NORM_LAYERS = {
+            "None": None,
+            "BatchNorm": nn.BatchNorm1d,
+            "LayerNorm": nn.LayerNorm,
+            "MaskedBatchNorm": None,
+        }
+        default is None
+        """
         # -------------------------------------------------
         self.normalization: str = "LayerNorm"
 
@@ -79,11 +137,20 @@ class Options(Namespace):
         # Number of subjets to use as context
         self.num_context_subjets: int = 10
 
+        # Depth of the encoder network
+        self.encoder_depth: int = 3
+
         # Depth of the predictor network
         self.pred_depth: int = 3
 
         # Ratio for the MLP in transformer layers
         self.mlp_ratio: float = 4.0
+
+        # Initial std for trunc_normal_
+        self.init_std: float = 0.02
+
+        # Dimension of subjet representations
+        self.repr_dim: int = 1024
 
         # =========================================================================================
         # Optimizer Parameters
@@ -165,7 +232,11 @@ class Options(Namespace):
             table.add_column("Value", justify="left")
 
             for key, value in sorted(self.__dict__.items()):
-                table.add_row(key, str(value), style="red" if value != default_options.get(key) else None)
+                table.add_row(
+                    key,
+                    str(value),
+                    style="red" if value != default_options.get(key) else None,
+                )
 
             console.print(table)
 
@@ -178,12 +249,23 @@ class Options(Namespace):
             print("=" * 70)
 
     def update_options(self, new_options: Dict[str, Any], update_datasets: bool = True):
-        integer_options = {key for key, val in self.__dict__.items() if isinstance(val, int)}
-        float_options = {key for key, val in self.__dict__.items() if isinstance(val, float)}
-        boolean_options = {key for key, val in self.__dict__.items() if isinstance(val, bool)}
-        
+        integer_options = {
+            key for key, val in self.__dict__.items() if isinstance(val, int)
+        }
+        float_options = {
+            key for key, val in self.__dict__.items() if isinstance(val, float)
+        }
+        boolean_options = {
+            key for key, val in self.__dict__.items() if isinstance(val, bool)
+        }
+
         for key, value in new_options.items():
-            if not update_datasets and key in {"event_info_file", "training_file", "validation_file", "testing_file"}:
+            if not update_datasets and key in {
+                "event_info_file",
+                "training_file",
+                "validation_file",
+                "testing_file",
+            }:
                 continue
 
             if key in integer_options:
@@ -196,16 +278,16 @@ class Options(Namespace):
                 setattr(self, key, value)
 
     def update(self, filepath: str):
-        with open(filepath, 'r') as json_file:
+        with open(filepath, "r") as json_file:
             self.update_options(json.load(json_file))
 
     @classmethod
     def load(cls, filepath: str):
         options = cls()
-        with open(filepath, 'r') as json_file:
+        with open(filepath, "r") as json_file:
             options.update_options(json.load(json_file))
         return options
 
     def save(self, filepath: str):
-        with open(filepath, 'w') as json_file:
+        with open(filepath, "w") as json_file:
             json.dump(self.__dict__, json_file, indent=4, sort_keys=True)
