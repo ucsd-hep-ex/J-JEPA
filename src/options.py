@@ -157,7 +157,7 @@ class Options(Namespace):
         # =========================================================================================
 
         # Training batch size.
-        self.batch_size: int = 4096
+        self.batch_size: int = 256
 
         # The optimizer to use for training the network.
         # This must be a valid class in torch.optim or nvidia apex with 'apex' prefix.
@@ -241,6 +241,9 @@ class Options(Namespace):
 
         # number of steps per epoch
         self.num_steps_per_epoch: int = self.num_jets // self.batch_size
+
+        # number of steps per epoch
+        self.log_freq: int = 10
 
     def display(self):
         try:

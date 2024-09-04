@@ -55,6 +55,8 @@ def create_random_masks(batch_size, num_subjets, device, context_scale=0.7):
     context_masks = []
     target_masks = []
 
+    print("Batch size", batch_size)
+
     for _ in range(batch_size):
         indices = torch.randperm(num_subjets, device=device)
         context_size = int(num_subjets * context_scale)
@@ -153,6 +155,7 @@ def main(rank, world_size, args):
     logger.info(f'Initialized (rank/world-size) {rank}/{world_size}')
     
     model = JJEPA(options).to(device)
+    model = model.to(dtype=torch.float32)
     if world_size > 1:
         model = DistributedDataParallel(model, device_ids=[rank])
 
@@ -174,7 +177,12 @@ def main(rank, world_size, args):
         time_meter = AverageMeter()
 
         for itr, (x, particle_features, subjets, particle_indices, subjet_mask, particle_mask) in enumerate(train_loader):
+            x = x.to(dtype=torch.float32)
             x = x.to(device, non_blocking=True)
+            print("x", x.shape)
+            x = x.view(x.shape[0], options.num_subjets, options.num_particles * options.num_part_ftr)
+            
+            
             particle_features = particle_features.to(device, non_blocking=True)
             subjets = subjets.to(device, non_blocking=True)
             particle_indices = particle_indices.to(device, non_blocking=True)
@@ -182,7 +190,7 @@ def main(rank, world_size, args):
             particle_mask = particle_mask.to(device, non_blocking=True)
             
             context_masks, target_masks = create_random_masks(
-                options.batch_size, 
+                x.shape[0], 
                 options.num_subjets,
                 device
             )
@@ -193,18 +201,34 @@ def main(rank, world_size, args):
 
             def train_step():
                 options = Options()
-                options.load("src/test_options.json")
+                options.load("test_options.json")
                 optimizer.zero_grad()
 
-                with autocast(enabled=options.use_amp):
+                print(" subjet", subjets.shape)
+                print("context mask", context_masks.shape)
+                print("target mask", target_masks.shape)
+
+                # remove the zeros and collapse it 
+                # sub_j_context = subjets[context_masks.unsqueeze(-1).expand(-1, -1, subjets.shape[-1])]
+                sub_j_context = subjets[context_masks]
+                num_ctxt_selected = context_masks.sum(dim=1).min()  # Minimum to handle potentially non-uniform selections
+                selected_sub_j_context = sub_j_context.view(subjets.shape[0], num_ctxt_selected, subjets.shape[-1])
+                print("sub_j_context", selected_sub_j_context.shape)
+
+                sub_j_target = subjets[target_masks]
+                num_tgt_selected = target_masks.sum(dim=1).min()  # Minimum to handle potentially non-uniform selections
+                selected_sub_j_target = sub_j_target.view(subjets.shape[0], num_tgt_selected, subjets.shape[-1])
+                print("sub_j_target", selected_sub_j_target.shape)
+
+                with autocast(device_type= "cuda", enabled=options.use_amp):
                     context = {
-                        'subjets': subjets * context_masks.unsqueeze(-1),
+                        'subjets': selected_sub_j_context,
                         'particle_mask': particle_mask,
                         'subjet_mask': subjet_mask * context_masks,
                         'split_mask': context_masks,
                     }
                     target = {
-                        'subjets': subjets * target_masks.unsqueeze(-1),
+                        'subjets': selected_sub_j_target,
                         'particle_mask': particle_mask,
                         'subjet_mask': subjet_mask * target_masks,
                         'split_mask': target_masks,
@@ -213,11 +237,16 @@ def main(rank, world_size, args):
                         'particles': x,
                         'particle_mask': particle_mask,
                         'subjet_mask': subjet_mask,
+                        'subjets':subjets
                     }
-
+                    
                     pred_repr, target_repr = model(context, target, full_jet)
                     loss = nn.functional.mse_loss(pred_repr, target_repr)
-
+                    print("context['subjets']", context['subjets'].shape)
+                    print("target['subjets']", target['subjets'].shape)
+                    print("full_jet['subjets']", full_jet['subjets'].shape)
+                    print("sub_j_context", sub_j_context.shape)
+                    print("sub_j_target", sub_j_target.shape)
                 if options.use_amp:
                     scaler.scale(loss).backward()
                     scaler.unscale_(optimizer)
