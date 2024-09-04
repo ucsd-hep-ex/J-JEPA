@@ -333,7 +333,8 @@ class JJEPA(nn.Module):
             full_jet, full_jet["subjets"], context["split_mask"]
         )
         # Debug Statement
-        context_repr = self.context_check(context_repr)
+        if self.options.debug:
+            context_repr = self.context_check(context_repr)
         target_repr = self.target_transformer(
             full_jet, full_jet["subjets"], target["split_mask"]
         )
@@ -345,7 +346,8 @@ class JJEPA(nn.Module):
                 target["subjets"],
                 context["subjets"],
             )
-            pred_repr = self.predictor_check(pred_repr)
+            if self.options.debug:
+                pred_repr = self.predictor_check(pred_repr)
             if self.options.debug:
                 print(
                     f"JJEPA output - pred_repr shape: {pred_repr.shape}, context_repr shape: {context_repr.shape}"
