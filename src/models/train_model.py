@@ -70,7 +70,7 @@ def create_random_masks(batch_size, num_subjets, device, context_scale=0.7):
         context_masks.append(context_mask)
         target_masks.append(target_mask)
 
-    return torch.stack(context_masks), torch.stack(target_masks)
+    return torch.stack(context_masks).bool(), torch.stack(target_masks).bool()
 
 def save_checkpoint(model, optimizer, epoch, loss, output_dir):
     checkpoint = {
@@ -192,23 +192,30 @@ def main(rank, world_size, args):
                 param_group['momentum'] = current_momentum
 
             def train_step():
+                options = Options()
+                options.load("src/test_options.json")
                 optimizer.zero_grad()
 
                 with autocast(enabled=options.use_amp):
                     context = {
-                        'particles': x * context_masks.unsqueeze(-1).unsqueeze(-1),
                         'subjets': subjets * context_masks.unsqueeze(-1),
                         'particle_mask': particle_mask,
                         'subjet_mask': subjet_mask * context_masks,
+                        'split_mask': context_masks,
                     }
                     target = {
-                        'particles': x * target_masks.unsqueeze(-1).unsqueeze(-1),
                         'subjets': subjets * target_masks.unsqueeze(-1),
                         'particle_mask': particle_mask,
                         'subjet_mask': subjet_mask * target_masks,
+                        'split_mask': target_masks,
+                    }
+                    full_jet = {
+                        'particles': x,
+                        'particle_mask': particle_mask,
+                        'subjet_mask': subjet_mask,
                     }
 
-                    pred_repr, target_repr = model(context, target)
+                    pred_repr, target_repr = model(context, target, full_jet)
                     loss = nn.functional.mse_loss(pred_repr, target_repr)
 
                 if options.use_amp:
