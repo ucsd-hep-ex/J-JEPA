@@ -2,14 +2,12 @@ import os
 import sys
 import logging
 import argparse
-import yaml
 from pathlib import Path
 
 import numpy as np
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from torch.nn.parallel import DistributedDataParallel
@@ -21,7 +19,6 @@ from options import Options
 from models.jjepa import JJEPA
 from dataset.JEPADataset import JEPADataset
 
-# Set up basic logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -39,34 +36,6 @@ def setup_environment(rank):
         torch.cuda.set_device(rank)
     torch.distributed.init_process_group(backend='nccl', init_method='env://')
 
-def setup_model(options, device):
-    model = JJEPA(
-        options=options,
-        input_dim=options.num_part_ftr * options.num_particles,
-        embed_dim=options.emb_dim,
-        depth=options.num_layers,
-        num_heads=options.num_heads,
-        mlp_ratio=options.mlp_ratio,
-        dropout=options.dropout,
-        use_predictor=True
-    ).to(device)
-    
-    target_encoder = JJEPA(
-        options=options,
-        input_dim=options.num_part_ftr * options.num_particles,
-        embed_dim=options.emb_dim,
-        depth=options.num_layers,
-        num_heads=options.num_heads,
-        mlp_ratio=options.mlp_ratio,
-        dropout=options.dropout,
-        use_predictor=False
-    ).to(device)
-    
-    for p in target_encoder.parameters():
-        p.requires_grad = False
-    
-    return model, target_encoder
-
 def setup_data_loader(options, data_path, world_size, rank):
     dataset = JEPADataset(data_path, num_jets=options.num_jets)
     sampler = torch.utils.data.distributed.DistributedSampler(
@@ -82,7 +51,7 @@ def setup_data_loader(options, data_path, world_size, rank):
     )
     return loader, sampler
 
-def create_random_masks(batch_size, num_subjets, num_features, subjet_length, device, context_scale=0.7):
+def create_random_masks(batch_size, num_subjets, device, context_scale=0.7):
     context_masks = []
     target_masks = []
 
@@ -92,8 +61,8 @@ def create_random_masks(batch_size, num_subjets, num_features, subjet_length, de
         context_indices = indices[:context_size]
         target_indices = indices[context_size:]
 
-        context_mask = torch.zeros(num_subjets, num_features, subjet_length, device=device)
-        target_mask = torch.zeros(num_subjets, num_features, subjet_length, device=device)
+        context_mask = torch.zeros(num_subjets, device=device)
+        target_mask = torch.zeros(num_subjets, device=device)
 
         context_mask[context_indices] = 1
         target_mask[target_indices] = 1
@@ -103,10 +72,9 @@ def create_random_masks(batch_size, num_subjets, num_features, subjet_length, de
 
     return torch.stack(context_masks), torch.stack(target_masks)
 
-def save_checkpoint(model, target_encoder, optimizer, epoch, loss, output_dir):
+def save_checkpoint(model, optimizer, epoch, loss, output_dir):
     checkpoint = {
         'model': model.state_dict(),
-        'target_encoder': target_encoder.state_dict(),
         'optimizer': optimizer.state_dict(),
         'epoch': epoch,
         'loss': loss
@@ -125,7 +93,6 @@ def setup_logging(rank, output_dir):
     )
 
 class AverageMeter(object):
-    """Computes and stores the average and current value"""
     def __init__(self):
         self.reset()
 
@@ -141,7 +108,6 @@ class AverageMeter(object):
         self.count += n
         self.avg = self.sum / self.count
 
-# momentum scheduler
 def create_momentum_scheduler(options):
     return cosine_scheduler(options.base_momentum, 1, options.num_epochs, options.num_steps_per_epoch)
 
@@ -177,16 +143,6 @@ def gpu_timer(closure):
 
     return result, elapsed_time
 
-def grad_logger(named_parameters):
-    grad_stats = {}
-    for name, param in named_parameters:
-        if param.grad is not None:
-            grad_stats[name] = param.grad.norm().item()
-    return grad_stats
-
-def repeat_interleave_batch(tensor, batch_size, repeat):
-    return tensor.repeat_interleave(repeat, dim=0)
-
 def main(rank, world_size, args):
     if world_size > 1:
         setup_environment(rank)
@@ -196,14 +152,13 @@ def main(rank, world_size, args):
     setup_logging(rank, args.output_dir)
     logger.info(f'Initialized (rank/world-size) {rank}/{world_size}')
     
-    model, target_encoder = setup_model(options, device)
+    model = JJEPA(options).to(device)
     if world_size > 1:
         model = DistributedDataParallel(model, device_ids=[rank])
-        target_encoder = DistributedDataParallel(target_encoder, device_ids=[rank])
 
     train_loader, train_sampler = setup_data_loader(options, args.data_path, world_size, rank)
 
-    optimizer = optim.AdamW(model.parameters(), lr=options.lr)
+    optimizer = optim.AdamW(model.parameters(), lr=options.lr, weight_decay=options.weight_decay)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=options.num_epochs)
     scaler = GradScaler()
 
@@ -226,32 +181,35 @@ def main(rank, world_size, args):
             subjet_mask = subjet_mask.to(device, non_blocking=True)
             particle_mask = particle_mask.to(device, non_blocking=True)
             
-            masks_enc, masks_pred = create_random_masks(
+            context_masks, target_masks = create_random_masks(
                 options.batch_size, 
-                options.num_subjets, 
-                options.num_part_ftr, 
-                options.num_particles,
+                options.num_subjets,
                 device
             )
+
+            current_momentum = next(momentum_scheduler)
+            for param_group in optimizer.param_groups:
+                param_group['momentum'] = current_momentum
 
             def train_step():
                 optimizer.zero_grad()
 
-                def forward_target():
-                    with torch.no_grad():
-                        h = target_encoder(x, subjets)
-                        h = F.layer_norm(h, (h.size(-1),))
-                        h = repeat_interleave_batch(h, len(h), repeat=len(masks_enc))
-                    return h
+                with autocast(enabled=options.use_amp):
+                    context = {
+                        'particles': x * context_masks.unsqueeze(-1).unsqueeze(-1),
+                        'subjets': subjets * context_masks.unsqueeze(-1),
+                        'particle_mask': particle_mask,
+                        'subjet_mask': subjet_mask * context_masks,
+                    }
+                    target = {
+                        'particles': x * target_masks.unsqueeze(-1).unsqueeze(-1),
+                        'subjets': subjets * target_masks.unsqueeze(-1),
+                        'particle_mask': particle_mask,
+                        'subjet_mask': subjet_mask * target_masks,
+                    }
 
-                def forward_context():
-                    z = model(x, subjets, masks_enc, masks_pred)
-                    return z
-
-                h = forward_target()
-                z = forward_context()
-
-                loss = F.smooth_l1_loss(z, h)
+                    pred_repr, target_repr = model(context, target)
+                    loss = nn.functional.mse_loss(pred_repr, target_repr)
 
                 if options.use_amp:
                     scaler.scale(loss).backward()
@@ -264,11 +222,6 @@ def main(rank, world_size, args):
                     torch.nn.utils.clip_grad_norm_(model.parameters(), options.max_grad_norm)
                     optimizer.step()
 
-                with torch.no_grad():
-                    m = next(momentum_scheduler)
-                    for param_q, param_k in zip(model.parameters(), target_encoder.parameters()):
-                        param_k.data.mul_(m).add_((1.-m) * param_q.detach().data)
-
                 return float(loss)
 
             loss, etime = gpu_timer(train_step)
@@ -279,7 +232,7 @@ def main(rank, world_size, args):
                 logger.info(f'[{epoch + 1}, {itr}] loss: {loss_meter.avg:.3f} ({time_meter.avg:.1f} ms)')
 
         scheduler.step()
-        save_checkpoint(model, target_encoder, optimizer, epoch, loss_meter.avg, args.output_dir)
+        save_checkpoint(model, optimizer, epoch, loss_meter.avg, args.output_dir)
 
 if __name__ == "__main__":
     args = parse_args()
