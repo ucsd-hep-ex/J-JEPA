@@ -1,3 +1,5 @@
+import torch
+
 class DimensionCheckLayer(torch.nn.Module):
     def __init__(self, name, expected_dims):
         super().__init__()
