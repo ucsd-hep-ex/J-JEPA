@@ -208,7 +208,7 @@ class Options(Namespace):
         self.num_jets: int = 100000
 
         # Number of worker processes for data loading
-        self.num_workers: int = 4
+        self.num_workers: int = 0
 
         # =========================================================================================
         # File Paths
@@ -218,6 +218,30 @@ class Options(Namespace):
         self.training_file: str = training_file
         self.validation_file: str = validation_file
         self.testing_file: str = testing_file
+
+        # =========================================================================================
+        # Logging Parameters
+        # =========================================================================================
+
+        # Whether to display logging information
+        self.display_logging: bool = True
+
+        # =========================================================================================
+        # random Parameters
+        # =========================================================================================
+
+        # learing rate
+        self.lr: float = 1e-4
+
+        # base momentum
+        self.base_momentum: float = 0.99
+
+        # max grad norm
+        self.max_grad_norm: float = 1.0
+
+        # number of steps per epoch
+        self.num_steps_per_epoch: int = self.num_jets // self.batch_size
+
 
     def display(self):
         try:
