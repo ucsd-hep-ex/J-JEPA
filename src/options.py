@@ -242,10 +242,6 @@ class Options(Namespace):
         # number of steps per epoch
         self.num_steps_per_epoch: int = self.num_jets // self.batch_size
 
-<<<<<<< Updated upstream
-=======
-
->>>>>>> Stashed changes
     def display(self):
         try:
             from rich import get_console
