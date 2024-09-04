@@ -44,7 +44,7 @@ class Options(Namespace):
 
         # later embedding layers
         # embedding dimension size
-        self.emb_dim: int = 512
+        self.emb_dim: int = 1024
 
         # whether to add skip connections to the later embedding layers
         self.embedding_skip_connections: bool = True
@@ -91,16 +91,16 @@ class Options(Namespace):
         # qk_scale applied to attention layers.
         self.qk_scale: float = None
 
-        self.attn_dim: int = 512
+        self.attn_dim: int = self.emb_dim
 
         # Number of features in the hidden layers in MLP.
         self.hidden_features: int = 512
 
         # Number of input features in MLP.
-        self.in_features: int = 512
+        self.in_features: int = self.emb_dim
 
         # Number of output features in MLP.
-        self.out_features: int = 512
+        self.out_features: int = self.emb_dim
 
         # drop rate for the MLP
         self.drop_mlp: float = 0.0
@@ -150,7 +150,7 @@ class Options(Namespace):
         self.init_std: float = 0.02
 
         # Dimension of subjet representations
-        self.repr_dim: int = 1024
+        self.repr_dim: int = self.emb_dim
 
         # =========================================================================================
         # Optimizer Parameters
