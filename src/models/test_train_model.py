@@ -1,15 +1,17 @@
 import sys
 import os
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import torch
 import argparse
 from pathlib import Path
-from train_model import main, parse_args
-from options import Options
+from src.models.train_model import main, parse_args
+from src.options import Options
 import sys
 import h5py
 import numpy as np
 import torch.multiprocessing as mp
+
 
 def create_mock_data(options, tmp_path):
     num_jets = options.num_jets
@@ -18,14 +20,26 @@ def create_mock_data(options, tmp_path):
     num_features = options.num_part_ftr
 
     file_path = tmp_path / "mock_dataset.h5"
-    with h5py.File(file_path, 'w') as f:
-        f.create_dataset('x', data=np.random.randn(num_jets, num_subjets, num_particles, num_features))
-        f.create_dataset('particle_features', data=np.random.randn(num_jets, num_particles, num_features))
-        f.create_dataset('subjets', data=np.random.randn(num_jets, num_subjets, 5))
-        f.create_dataset('particle_indices', data=np.random.randint(0, num_particles, (num_jets, num_subjets, num_particles)))
-        f.create_dataset('subjet_mask', data=np.ones((num_jets, num_subjets)))
-        f.create_dataset('particle_mask', data=np.ones((num_jets, num_particles)))
+    with h5py.File(file_path, "w") as f:
+        f.create_dataset(
+            "x",
+            data=np.random.randn(num_jets, num_subjets, num_particles, num_features),
+        )
+        f.create_dataset(
+            "particle_features",
+            data=np.random.randn(num_jets, num_particles, num_features),
+        )
+        f.create_dataset("subjets", data=np.random.randn(num_jets, num_subjets, 5))
+        f.create_dataset(
+            "particle_indices",
+            data=np.random.randint(
+                0, num_particles, (num_jets, num_subjets, num_particles)
+            ),
+        )
+        f.create_dataset("subjet_mask", data=np.ones((num_jets, num_subjets)))
+        f.create_dataset("particle_mask", data=np.ones((num_jets, num_particles)))
     return str(file_path)
+
 
 def test_train_model():
     tmp_path = Path("./tmp_test_output")
@@ -57,9 +71,12 @@ def test_train_model():
 
     sys.argv = [
         "train_model.py",
-        "--config", str(config_path),
-        "--data_path", data_path,
-        "--output_dir", str(tmp_path)
+        "--config",
+        str(config_path),
+        "--data_path",
+        data_path,
+        "--output_dir",
+        str(tmp_path),
     ]
 
     args = parse_args()
@@ -74,7 +91,7 @@ def test_train_model():
 
     print(f"Checking for files in {tmp_path}")
     print(f"Files in directory: {os.listdir(tmp_path)}")
-    
+
     checkpoint_files = list(tmp_path.glob("checkpoint_epoch_*.pth"))
     log_files = list(tmp_path.glob("train_rank_*.log"))
 
@@ -82,9 +99,9 @@ def test_train_model():
         print("No checkpoint files found. Checking log files...")
         if len(log_files) > 0:
             print(f"Log files found: {log_files}")
-            with open(log_files[0], 'r') as f:
+            with open(log_files[0], "r") as f:
                 print("Last few lines of the log file:")
-                print('\n'.join(f.readlines()[-10:]))
+                print("\n".join(f.readlines()[-10:]))
         else:
             print("No log files found either.")
     else:
@@ -95,6 +112,6 @@ def test_train_model():
 
     print("Test completed successfully!")
 
+
 if __name__ == "__main__":
     test_train_model()
- 
