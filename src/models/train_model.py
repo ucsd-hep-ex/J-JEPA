@@ -65,7 +65,7 @@ def create_random_masks(batch_size, num_subjets, device, context_scale=0.7):
     context_masks = []
     target_masks = []
 
-    print("Batch size", batch_size)
+    # print("Batch size", batch_size)
 
     for _ in range(batch_size):
         indices = torch.randperm(num_subjets, device=device)
@@ -185,9 +185,48 @@ def main(rank, world_size, args):
         options, args.data_path, world_size, rank
     )
 
+    param_groups = [
+        {
+            "params": (
+                p
+                for n, p in model.context_transformer.named_parameters()
+                if ("bias" not in n) and (len(p.shape) != 1)
+            )
+        },
+        {
+            "params": (
+                p
+                for n, p in model.predictor_transformer.named_parameters()
+                if ("bias" not in n) and (len(p.shape) != 1)
+            )
+        },
+        {
+            "params": (
+                p
+                for n, p in model.context_transformer.named_parameters()
+                if ("bias" in n) or (len(p.shape) == 1)
+            ),
+            "WD_exclude": True,
+            "weight_decay": 0,
+        },
+        {
+            "params": (
+                p
+                for n, p in model.predictor_transformer.named_parameters()
+                if ("bias" in n) or (len(p.shape) == 1)
+            ),
+            "WD_exclude": True,
+            "weight_decay": 0,
+        },
+    ]
+
+    logger.info("Using AdamW")
     optimizer = optim.AdamW(
-        model.parameters(), lr=options.lr, weight_decay=options.weight_decay
+        param_groups, lr=options.lr, weight_decay=options.weight_decay
     )
+    # optimizer = optim.AdamW(
+    #     model.parameters(), lr=options.lr, weight_decay=options.weight_decay
+    # )
     scheduler = optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=options.num_epochs
     )
@@ -236,7 +275,7 @@ def main(rank, world_size, args):
 
             def train_step():
                 options = Options()
-                options.load("test_options.json")
+                options.load("src/test_options.json")
                 optimizer.zero_grad()
 
                 # print(" subjet", subjets.shape)
@@ -251,7 +290,7 @@ def main(rank, world_size, args):
                 selected_sub_j_context = sub_j_context.view(
                     subjets.shape[0], num_ctxt_selected, subjets.shape[-1]
                 )
-                print("sub_j_context", selected_sub_j_context.shape)
+                # print("sub_j_context", selected_sub_j_context.shape)
 
                 sub_j_target = subjets[target_masks]
                 num_tgt_selected = target_masks.sum(
@@ -260,7 +299,7 @@ def main(rank, world_size, args):
                 selected_sub_j_target = sub_j_target.view(
                     subjets.shape[0], num_tgt_selected, subjets.shape[-1]
                 )
-                print("sub_j_target", selected_sub_j_target.shape)
+                # print("sub_j_target", selected_sub_j_target.shape)
 
                 with autocast(device_type="cuda", enabled=options.use_amp):
                     context = {
@@ -303,6 +342,15 @@ def main(rank, world_size, args):
                         model.parameters(), options.max_grad_norm
                     )
                     optimizer.step()
+
+                # Step 3. momentum update of target encoder
+                with torch.no_grad():
+                    m = next(momentum_scheduler)
+                    for param_q, param_k in zip(
+                        model.context_transformer.parameters(),
+                        model.target_transformer.parameters(),
+                    ):
+                        param_k.data.mul_(m).add_((1.0 - m) * param_q.detach().data)
 
                 return float(loss)
 
