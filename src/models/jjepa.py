@@ -156,7 +156,8 @@ class JetsTransformer(nn.Module):
                 shape: [B, N_sj, emb_dim]
         """
         # Flatten last two dimensions to [B, SJ, P*DP]
-        B, SJ, P, DP = x.shape
+        x = x["particles"]
+        B, SJ, _ = x.shape
         x = x.view(B, SJ, -1)
 
         # subjet emb
@@ -306,12 +307,12 @@ class JJEPA(nn.Module):
     def forward(self, context, target, full_jet):
         print(f"JJEPA forward pass")
         context_repr = self.context_transformer(
-            full_jet, context["subjets"], context["split_mask"]
+            full_jet, full_jet["subjets"], context["split_mask"]
         )
         # Debug Statement
         context_repr = self.context_check(context_repr)
         target_repr = self.target_transformer(
-            full_jet, target["subjets"], target["split_mask"]
+            full_jet, full_jet["subjets"], target["split_mask"]
         )
         if self.use_predictor:
             # TODO: update the input to the model x, subjet_mask, target_subjet_ftrs, context_subjet_ftrs):
