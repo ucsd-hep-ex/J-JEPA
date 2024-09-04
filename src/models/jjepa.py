@@ -3,11 +3,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from src.layers.embedding_stack import EmbeddingStack
-from src.util.positional_embedding import create_pos_emb_fn
-from src.options import Options
-from src.util.tensors import trunc_normal_
-from src.util.DimensionCheckLayer import DimensionCheckLayer
+from layers.embedding_stack import EmbeddingStack
+from util.positional_embedding import create_pos_emb_fn
+from options import Options
+from util.tensors import trunc_normal_
+from util.DimensionCheckLayer import DimensionCheckLayer
 
 # A dictionary for normalization layers
 NORM_LAYERS = {
