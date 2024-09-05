@@ -44,27 +44,39 @@ class Attention(nn.Module):
         self.proj = nn.Linear(self.dim, self.dim)
         self.proj_drop = nn.Dropout(options.proj_drop)
 
-    def forward(self, x):
+        self.multihead_attn = nn.MultiheadAttention(self.dim, self.num_heads,
+                                                    batch_first=True)
+
+    def forward(self, x, subjet_masks):
         if self.options.debug:
             print(f"Attention forward pass with input shape: {x.shape}")
         B, N, C = x.shape
         assert C % self.num_heads == 0
         if self.options.debug:
             print("num_heads: ", self.num_heads)
+        # qkv = (
+        #     self.W_qkv(x)
+        #     .reshape(B, N, 3, self.num_heads, C // self.num_heads)
+        #     .permute(2, 0, 3, 1, 4)
+        # )
         qkv = (
             self.W_qkv(x)
-            .reshape(B, N, 3, self.num_heads, C // self.num_heads)
-            .permute(2, 0, 3, 1, 4)
+            .reshape(B, N, 3, C)
+            .permute(2, 0, 1, 3)
         )
         q, k, v = qkv[0], qkv[1], qkv[2]
-        attn = (q @ k.transpose(-2, -1)) * self.scale
-        attn = attn.softmax(dim=-1)
-        attn = self.attn_drop(attn)
-        x = (attn @ v).transpose(1, 2).reshape(B, N, C)
+        # attn = (q @ k.transpose(-2, -1)) * self.scale
+        # attn = attn.softmax(dim=-1)
+        # attn = self.attn_drop(attn)
+        # x = (attn @ v).transpose(1, 2).reshape(B, N, C)
+
+        x, _ = self.multihead_attn(q, k, v, key_padding_mask=subjet_masks)
+
         x = self.proj(x)
         x = self.proj_drop(x)
         if self.options.debug:
             print(f"Attention output shape: {x.shape}")
+
         return x
 
 
@@ -116,10 +128,10 @@ class Block(nn.Module):
         self.mlp = MLP(options)
 
 
-    def forward(self, x):
+    def forward(self, x, subjet_masks):
         if self.options.debug:
             print(f"Block forward pass with input shape: {x.shape}")
-        y = self.attn(self.norm1(x))
+        y = self.attn(self.norm1(x), subjet_masks)
         x = x + self.drop_path(y)
         x = x + self.drop_path(self.mlp(self.norm2(x)))
         if self.options.debug:
@@ -157,7 +169,7 @@ class JetsTransformer(nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
-    def forward(self, x, subjets_meta, split_mask):
+    def forward(self, x, subjet_masks, subjets_meta, split_mask):
         """
         Inputs:
             x: particles of subjets
@@ -187,7 +199,7 @@ class JetsTransformer(nn.Module):
 
         # forward prop
         for blk in self.blocks:
-            x = blk(x)
+            x = blk(x, subjet_masks)
 
         # norm
         x = self.norm(x)
@@ -277,9 +289,11 @@ class JetsTransformerPredictor(nn.Module):
         x = x.repeat(N_trgt, 1, 1)
 
         x = torch.cat([x, pred_token], axis=1)
+        subjet_masks = torch.cat([subjet_masks, torch.ones((B,1))], axis=1)
+        subjet_masks = subjet_masks.repeat(N_trgt, 1)
 
         for blk in self.predictor_blocks:
-            x = blk(x)
+            x = blk(x, subjet_masks)
         x = self.predictor_norm(x)
 
         # -- return the preds for target subjets
@@ -332,13 +346,13 @@ class JJEPA(nn.Module):
         if self.options.debug:
             print(f"JJEPA forward pass")
         context_repr = self.context_transformer(
-            full_jet, full_jet["subjets"], context["split_mask"]
+            full_jet, full_jet["subjet_mask"], full_jet["subjets"], context["split_mask"]
         )
         # Debug Statement
         if self.options.debug:
             context_repr = self.context_check(context_repr)
         target_repr = self.target_transformer(
-            full_jet, full_jet["subjets"], target["split_mask"]
+            full_jet, full_jet["subjet_mask"], full_jet["subjets"], target["split_mask"]
         )
         if self.use_predictor:
             # TODO: update the input to the model x, subjet_mask, target_subjet_ftrs, context_subjet_ftrs):
