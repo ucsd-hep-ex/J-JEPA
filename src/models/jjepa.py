@@ -32,7 +32,9 @@ class Attention(nn.Module):
         options: Options,
     ):
         super().__init__()
-        print("Initializing Attention module")
+        self.options = options
+        if options.debug:
+            print("Initializing Attention module")
         self.num_heads = options.num_heads
         self.dim = options.attn_dim
         self.head_dim = self.dim // options.num_heads
@@ -43,10 +45,12 @@ class Attention(nn.Module):
         self.proj_drop = nn.Dropout(options.proj_drop)
 
     def forward(self, x):
-        print(f"Attention forward pass with input shape: {x.shape}")
+        if self.options.debug:
+            print(f"Attention forward pass with input shape: {x.shape}")
         B, N, C = x.shape
         assert C % self.num_heads == 0
-        print("num_heads: ", self.num_heads)
+        if self.options.debug:
+            print("num_heads: ", self.num_heads)
         qkv = (
             self.W_qkv(x)
             .reshape(B, N, 3, self.num_heads, C // self.num_heads)
@@ -59,14 +63,17 @@ class Attention(nn.Module):
         x = (attn @ v).transpose(1, 2).reshape(B, N, C)
         x = self.proj(x)
         x = self.proj_drop(x)
-        print(f"Attention output shape: {x.shape}")
+        if self.options.debug:
+            print(f"Attention output shape: {x.shape}")
         return x
 
 
 class MLP(nn.Module):
     def __init__(self, options: Options):
         super().__init__()
-        print("Initializing MLP module")
+        self.options = options
+        if self.options.debug:
+            print("Initializing MLP module")
         act_layer = ACTIVATION_LAYERS.get(options.activation, nn.GELU)
         out_features = options.out_features or options.in_features
         hidden_features = options.hidden_features or options.in_features
@@ -76,45 +83,56 @@ class MLP(nn.Module):
         self.drop = nn.Dropout(options.drop_mlp)
 
     def forward(self, x):
-        print(f"MLP forward pass with input shape: {x.shape}")
+        if self.options.debug:
+            print(f"MLP forward pass with input shape: {x.shape}")
         x = self.fc1(x)
         x = self.act(x)
         x = self.drop(x)
         x = self.fc2(x)
         x = self.drop(x)
-        print(f"MLP output shape: {x.shape}")
+        if self.options.debug:
+            print(f"MLP output shape: {x.shape}")
         return x
 
 
 class Block(nn.Module):
     def __init__(self, options: Options):
         super().__init__()
-        print("Initializing Block module")
+        self.options = options
+        if self.options.debug:
+            print("Initializing Block module")
         act_layer = ACTIVATION_LAYERS.get(options.activation, nn.GELU)
         norm_layer = NORM_LAYERS.get(options.normalization, nn.LayerNorm)
-        self.norm1 = norm_layer(options.attn_dim)
+        self.norm1 = norm_layer(options.emb_dim)
         self.dim = options.attn_dim
         self.attn = Attention(options)
+
         self.drop_path = (
             nn.Identity() if options.drop_path <= 0 else nn.Dropout(options.drop_path)
         )
         self.norm2 = norm_layer(self.dim)
         mlp_hidden_dim = int(self.dim * options.mlp_ratio)
+        options.hidden_features = mlp_hidden_dim
         self.mlp = MLP(options)
 
+
     def forward(self, x):
-        print(f"Block forward pass with input shape: {x.shape}")
+        if self.options.debug:
+            print(f"Block forward pass with input shape: {x.shape}")
         y = self.attn(self.norm1(x))
         x = x + self.drop_path(y)
         x = x + self.drop_path(self.mlp(self.norm2(x)))
-        print(f"Block output shape: {x.shape}")
+        if self.options.debug:
+            print(f"Block output shape: {x.shape}")
         return x
 
 
 class JetsTransformer(nn.Module):
     def __init__(self, options: Options):
         super().__init__()
-        print("Initializing JetsTransformer module")
+        self.options = options
+        if self.options.debug:
+            print("Initializing JetsTransformer module")
         norm_layer = NORM_LAYERS.get(options.normalization, nn.LayerNorm)
         self.num_part_ftr = options.num_part_ftr
         self.embed_dim = options.emb_dim
@@ -125,10 +143,7 @@ class JetsTransformer(nn.Module):
                                          options.num_particles * options.num_part_ftr)
 
         self.blocks = nn.ModuleList(
-            [
-                Block(options)
-                for i in range(options.encoder_depth)
-            ]
+            [Block(options=options) for _ in range(options.encoder_depth)]
         )
         self.norm = norm_layer(options.emb_dim)
         self.apply(self._init_weights)
@@ -142,27 +157,32 @@ class JetsTransformer(nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
-    def forward(self, subjets, subjets_meta):
+    def forward(self, x, subjets_meta, split_mask):
         """
         Inputs:
             x: particles of subjets
-                shape: [B, N_sj, N_part, N_part_ftr]
+                shape: [B, N_sj, N_part * N_part_ftr]
             subjet_meta: 4 vec of subjets
                 shape: [B, N_sj, N_sj_ftr=5]
                 N_sj_ftr: pt, eta, phi, E, num_part
+            split_mask: mask out certain subjet representations, depending on context/target
+                shape: [B, N_sj_to_keep]
         Return:
             subjet representations
+                shape: [B, N_sj, emb_dim]
         """
         # Flatten last two dimensions to [B, SJ, P*DP]
-        B, SJ, P, DP = subjets.shape
-        x = subjets.view(B, SJ, -1)
+        x = x["particles"]
+        B, SJ, _ = x.shape
+        x = x.view(B, SJ, -1)
 
         # subjet emb
         x = self.subjet_emb(x)
 
         # pos emb
         pos_emb = self.calc_pos_emb(subjets_meta)
-        print(pos_emb.shape)
+        if self.options.debug:
+            print(pos_emb.shape)
         x += pos_emb
 
         # forward prop
@@ -172,37 +192,36 @@ class JetsTransformer(nn.Module):
         # norm
         x = self.norm(x)
 
-        return x
+        # select indices of certain subjet representations from split_mask
+        selected_subjets = x[split_mask.unsqueeze(-1).expand(-1, -1, x.shape[-1])]
+
+        num_selected = split_mask.sum(
+            dim=1
+        ).min()  # Minimum to handle potentially non-uniform selections
+        selected_subjets = selected_subjets.view(B, num_selected, x.shape[-1])
+
+        return selected_subjets
 
 
 class JetsTransformerPredictor(nn.Module):
     def __init__(self, options: Options):
         super().__init__()
-        print("Initializing JetsTransformerPredictor module")
+        self.options = options
+        if self.options.debug:
+            print("Initializing JetsTransformerPredictor module")
         norm_layer = NORM_LAYERS.get(options.normalization, nn.LayerNorm)
         self.init_std = options.init_std
-        self.predictor_embed = nn.Linear(options.repr_dim, options.repr_dim, bias=True)
-        self.predictor_subjet_emb = PredictorEmbeddingStack(options,
+        self.predictor_embed = PredictorEmbeddingStack(options,
                                                    input_dim = options.num_particles * options.num_part_ftr)
         self.calc_predictor_pos_emb = create_pos_emb_fn(options.repr_dim)
+        options.emb_dim = options.repr_dim
+        options.attn_dim = options.repr_dim
+        options.in_features = options.repr_dim
+        options.out_features = options.repr_dim
         self.predictor_blocks = nn.ModuleList(
-            [
-                Block(
-                    dim=options.repr_dim,
-                    num_heads=options.num_heads,
-                    mlp_ratio=options.mlp_ratio,
-                    qkv_bias=options.qkv_bias,
-                    qk_scale=options.qk_scale,
-                    drop=options.dropout,
-                    attn_drop=options.attn_drop,
-                    drop_path=options.drop_path,
-                    norm_layer=norm_layer,
-                )
-                for _ in range(options.pred_depth)
-            ]
+            [Block(options=options) for _ in range(options.pred_depth)]
         )
         self.predictor_norm = norm_layer(options.repr_dim)
-        # TODO: figure out predictor_output_dim
         self.predictor_proj = nn.Linear(
             options.repr_dim, options.repr_dim, bias=True
         )  # Match target dimensions
@@ -234,7 +253,8 @@ class JetsTransformerPredictor(nn.Module):
             predicted target subjet representations
                 shape: [B, N_trgt, predictor_output_dim]
         """
-        print(f"JetsTransformerPredictor forward pass with input shape: {x.shape}")
+        if self.options.debug:
+            print(f"JetsTransformerPredictor forward pass with input shape: {x.shape}")
         # calcualte context positional embedding
         x = self.predictor_embed(x)
         x += self.calc_predictor_pos_emb(context_subjet_ftrs)
@@ -265,14 +285,17 @@ class JetsTransformerPredictor(nn.Module):
         # -- return the preds for target subjets
         x = x[:, N_ctxt:, :]
         x = self.predictor_proj(x)
-        print(f"JetsTransformerPredictor output shape: {x.shape}")
+        if self.options.debug:
+            print(f"JetsTransformerPredictor output shape: {x.shape}")
         return x.view(B, N_trgt, -1)
 
 
 class JJEPA(nn.Module):
     def __init__(self, options: Options):
         super(JJEPA, self).__init__()
-        print("Initializing JJEPA module")
+        self.options = options
+        if self.options.debug:
+            print("Initializing JJEPA module")
         self.use_predictor = options.use_predictor
         self.context_transformer = JetsTransformer(options=options)
         self.target_transformer = copy.deepcopy(self.context_transformer)
@@ -280,38 +303,61 @@ class JJEPA(nn.Module):
             self.predictor_transformer = JetsTransformerPredictor(options=options)
 
         # Debug Statement
-        self.input_check = DimensionCheckLayer("Model Input", 3)
-        self.context_check = DimensionCheckLayer("After Context Transformer", 3)
-        self.predictor_check = DimensionCheckLayer("After Predictor", 3)
+        if self.options.debug:
+            self.input_check = DimensionCheckLayer("Model Input", 3)
+            self.context_check = DimensionCheckLayer("After Context Transformer", 3)
+            self.predictor_check = DimensionCheckLayer("After Predictor", 3)
 
     """
     context = {
-        particles: torch.Tensor,
         subjets: torch.Tensor,
+        particle_mask: torch.Tensor,
+        subjet_mask: torch.Tensor,
+        split_mask: torch.Tensor,
+    }
+    target = {
+        subjets: torch.Tensor,
+        particle_mask: torch.Tensor,
+        subjet_mask: torch.Tensor,
+        split_mask: torch.Tensor,
+    }
+    full_jet = {
+        particles: torch.Tensor,
         particle_mask: torch.Tensor,
         subjet_mask: torch.Tensor,
     }
     """
 
-    def forward(self, context, target):
-        print(
-            f"JJEPA forward pass with context shape: {context.shape} and target shape: {target.shape}"
+    def forward(self, context, target, full_jet):
+        if self.options.debug:
+            print(f"JJEPA forward pass")
+        context_repr = self.context_transformer(
+            full_jet, full_jet["subjets"], context["split_mask"]
         )
-        # TODO: update the input to the model
-        context_repr = self.context_transformer(context)
         # Debug Statement
-        context_repr = self.context_check(context_repr)
-        target_repr = self.target_transformer(target)
+        if self.options.debug:
+            context_repr = self.context_check(context_repr)
+        target_repr = self.target_transformer(
+            full_jet, full_jet["subjets"], target["split_mask"]
+        )
         if self.use_predictor:
-            # TODO: update the input to the model
-            pred_repr = self.predictor_transformer(context_repr, context, target)
-            pred_repr = self.predictor_check(pred_repr)
-            print(
-                f"JJEPA output - pred_repr shape: {pred_repr.shape}, context_repr shape: {context_repr.shape}"
+            # TODO: update the input to the model x, subjet_mask, target_subjet_ftrs, context_subjet_ftrs):
+            pred_repr = self.predictor_transformer(
+                context_repr,
+                context["subjet_mask"],
+                target["subjets"],
+                context["subjets"],
             )
+            if self.options.debug:
+                pred_repr = self.predictor_check(pred_repr)
+            if self.options.debug:
+                print(
+                    f"JJEPA output - pred_repr shape: {pred_repr.shape}, context_repr shape: {context_repr.shape}"
+                )
             return pred_repr, target_repr
 
-        print(
-            f"JJEPA output - context_repr shape: {context_repr.shape}, target shape: {target_repr.shape}"
-        )
-        return context_repr, target
+        if self.options.debug:
+            print(
+                f"JJEPA output - context_repr shape: {context_repr.shape}, target shape: {target_repr.shape}"
+            )
+        return context_repr, target_repr

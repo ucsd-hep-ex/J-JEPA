@@ -44,7 +44,7 @@ class Options(Namespace):
 
         # later embedding layers
         # embedding dimension size
-        self.emb_dim: int = 512
+        self.emb_dim: int = 1024
         self.predictor_emb_dim = 1024
 
         # whether to add skip connections to the later embedding layers
@@ -92,16 +92,16 @@ class Options(Namespace):
         # qk_scale applied to attention layers.
         self.qk_scale: float = None
 
-        self.attn_dim: int = 64
+        self.attn_dim: int = self.emb_dim
 
         # Number of features in the hidden layers in MLP.
         self.hidden_features: int = 512
 
         # Number of input features in MLP.
-        self.in_features: int = 512
+        self.in_features: int = self.emb_dim
 
         # Number of output features in MLP.
-        self.out_features: int = 512
+        self.out_features: int = self.emb_dim
 
         # drop rate for the MLP
         self.drop_mlp: float = 0.0
@@ -151,14 +151,14 @@ class Options(Namespace):
         self.init_std: float = 0.02
 
         # Dimension of subjet representations
-        self.repr_dim: int = 1024
+        self.repr_dim: int = self.emb_dim
 
         # =========================================================================================
         # Optimizer Parameters
         # =========================================================================================
 
         # Training batch size.
-        self.batch_size: int = 4096
+        self.batch_size: int = 256
 
         # The optimizer to use for training the network.
         # This must be a valid class in torch.optim or nvidia apex with 'apex' prefix.
@@ -243,6 +243,11 @@ class Options(Namespace):
         # number of steps per epoch
         self.num_steps_per_epoch: int = self.num_jets // self.batch_size
 
+        # number of steps per epoch
+        self.log_freq: int = 10
+
+        # debug mode
+        self.debug: bool = False
 
     def display(self):
         try:
