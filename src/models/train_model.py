@@ -458,18 +458,35 @@ def main(rank, world_size, args):
                 )
                 # print("sub_j_target", selected_sub_j_target.shape)
 
+                context_subjets_mask = subjet_mask[context_masks]
+                num_cxt_subj_mask_selected = context_masks.sum(
+                    dim=1
+                ).min()  # Minimum to handle potentially non-uniform selections
+                context_subjets_mask = context_subjets_mask.view(
+                    subjets.shape[0], num_cxt_subj_mask_selected
+                )
+
+                target_subject_mask = subjet_mask[target_masks]
+                num_trg_subj_mask_selected = target_masks.sum(
+                    dim=1
+                ).min()  # Minimum to handle potentially non-uniform selections
+                target_subjets_mask = target_subject_mask.view(
+                    subjets.shape[0], num_trg_subj_mask_selected
+                )
+
+
                 with torch.no_grad():
                     model.eval()
                     context = {
                         "subjets": selected_sub_j_context,
                         "particle_mask": particle_mask,
-                        "subjet_mask": subjet_mask * context_masks,
+                        "subjet_mask": context_subjets_mask,
                         "split_mask": context_masks,
                     }
                     target = {
                         "subjets": selected_sub_j_target,
                         "particle_mask": particle_mask,
-                        "subjet_mask": subjet_mask * target_masks,
+                        "subjet_mask": target_subjets_mask,
                         "split_mask": target_masks,
                     }
                     full_jet = {
