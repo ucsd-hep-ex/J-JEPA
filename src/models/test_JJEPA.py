@@ -31,7 +31,7 @@ if __name__ == "__main__":
         # Create random data for context and target
         context_subjets = torch.randn(batch_size, num_ctxt_subjets, num_subjet_features)
         context_particle_mask = torch.randint(0, 2, (batch_size, num_particles)).bool()
-        context_subjet_mask = torch.randint(0, 2, (batch_size, num_subjets)).bool()
+        context_subjet_mask = torch.randint(0, 2, (batch_size, num_ctxt_subjets)).bool()
         context_split_mask = torch.cat(
             (
                 torch.zeros(batch_size, num_subjets - num_ctxt_subjets),
@@ -42,7 +42,7 @@ if __name__ == "__main__":
 
         target_subjets = torch.randn(batch_size, num_trgt_subjets, num_subjet_features)
         target_particle_mask = torch.randint(0, 2, (batch_size, num_particles)).bool()
-        target_subjet_mask = torch.randint(0, 2, (batch_size, num_subjets)).bool()
+        target_subjet_mask = torch.randint(0, 2, (batch_size, num_trgt_subjets)).bool()
         target_split_mask = torch.cat(
             (
                 torch.zeros(batch_size, num_subjets - num_trgt_subjets),
