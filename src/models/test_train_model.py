@@ -19,8 +19,9 @@ def create_mock_data(options, tmp_path):
     num_particles = options.num_particles
     num_features = options.num_part_ftr
 
-    file_path = tmp_path / "mock_dataset.h5"
-    with h5py.File(file_path, "w") as f:
+    train_file_path = tmp_path / "train_mock_dataset.h5"
+    val_file_path = tmp_path / "val_mock_dataset.h5"
+    with h5py.File(train_file_path, "w") as f:
         f.create_dataset(
             "x",
             data=np.random.randn(num_jets, num_subjets, num_particles, num_features),
@@ -38,7 +39,26 @@ def create_mock_data(options, tmp_path):
         )
         f.create_dataset("subjet_mask", data=np.ones((num_jets, num_subjets)))
         f.create_dataset("particle_mask", data=np.ones((num_jets, num_particles)))
-    return str(file_path)
+    num_jets //= 10
+    with h5py.File(val_file_path, "w") as f:
+        f.create_dataset(
+            "x",
+            data=np.random.randn(num_jets, num_subjets, num_particles, num_features),
+        )
+        f.create_dataset(
+            "particle_features",
+            data=np.random.randn(num_jets, num_particles, num_features),
+        )
+        f.create_dataset("subjets", data=np.random.randn(num_jets, num_subjets, 5))
+        f.create_dataset(
+            "particle_indices",
+            data=np.random.randint(
+                0, num_particles, (num_jets, num_subjets, num_particles)
+            ),
+        )
+        f.create_dataset("subjet_mask", data=np.ones((num_jets, num_subjets)))
+        f.create_dataset("particle_mask", data=np.ones((num_jets, num_particles)))
+    return str(train_file_path)
 
 
 def test_train_model():
