@@ -44,8 +44,8 @@ class Options(Namespace):
 
         # later embedding layers
         # embedding dimension size
-        self.emb_dim: int = 512
-        self.predictor_emb_dim = 1024
+        self.emb_dim: int = 1024
+        self.predictor_emb_dim = 512
 
         # whether to add skip connections to the later embedding layers
         self.embedding_skip_connections: bool = True
@@ -151,7 +151,9 @@ class Options(Namespace):
         self.init_std: float = 0.02
 
         # Dimension of subjet representations
-        self.repr_dim: int = self.predictor_emb_dim
+        # Note that this is a dynamic variable
+        # depending on where you create the attention block
+        self.repr_dim: int = -1
 
         # =========================================================================================
         # Optimizer Parameters
