@@ -212,7 +212,7 @@ class JetsTransformerPredictor(nn.Module):
         norm_layer = NORM_LAYERS.get(options.normalization, nn.LayerNorm)
         self.init_std = options.init_std
         self.predictor_embed = PredictorEmbeddingStack(options,
-                                                   input_dim = options.num_particles * options.num_part_ftr)
+                                                   input_dim = options.emb_dim)
         self.calc_predictor_pos_emb = create_pos_emb_fn(options.repr_dim)
         options.emb_dim = options.repr_dim
         options.attn_dim = options.repr_dim
@@ -297,10 +297,10 @@ class JJEPA(nn.Module):
         if self.options.debug:
             print("Initializing JJEPA module")
         self.use_predictor = options.use_predictor
-        self.context_transformer = JetsTransformer(options=options)
+        self.context_transformer = JetsTransformer(options)
         self.target_transformer = copy.deepcopy(self.context_transformer)
         if self.use_predictor:
-            self.predictor_transformer = JetsTransformerPredictor(options=options)
+            self.predictor_transformer = JetsTransformerPredictor(options)
 
         # Debug Statement
         if self.options.debug:

@@ -44,7 +44,7 @@ class Options(Namespace):
 
         # later embedding layers
         # embedding dimension size
-        self.emb_dim: int = 1024
+        self.emb_dim: int = 512
         self.predictor_emb_dim = 1024
 
         # whether to add skip connections to the later embedding layers
@@ -151,7 +151,7 @@ class Options(Namespace):
         self.init_std: float = 0.02
 
         # Dimension of subjet representations
-        self.repr_dim: int = self.emb_dim
+        self.repr_dim: int = self.predictor_emb_dim
 
         # =========================================================================================
         # Optimizer Parameters
