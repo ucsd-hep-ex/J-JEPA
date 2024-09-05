@@ -282,11 +282,11 @@ def main(rank, world_size, args):
                 options.num_particles * options.num_part_ftr,
             )
 
-            particle_features = particle_features.to(device, non_blocking=True)
-            subjets = subjets.to(device, non_blocking=True)
-            particle_indices = particle_indices.to(device, non_blocking=True)
-            subjet_mask = subjet_mask.to(device, non_blocking=True)
-            particle_mask = particle_mask.to(device, non_blocking=True)
+            particle_features = particle_features.to(device, non_blocking=True, dtype=torch.float32)
+            subjets = subjets.to(device, non_blocking=True, dtype=torch.float32)
+            particle_indices = particle_indices.to(device, non_blocking=True, dtype=torch.float32)
+            subjet_mask = subjet_mask.to(device, non_blocking=True, dtype=torch.float32)
+            particle_mask = particle_mask.to(device, non_blocking=True, dtype=torch.float32)
 
             context_masks, target_masks = create_random_masks(
                 x.shape[0], options.num_subjets, device
@@ -324,17 +324,33 @@ def main(rank, world_size, args):
                 )
                 # print("sub_j_target", selected_sub_j_target.shape)
 
+                context_subjets_mask = subjet_mask[context_masks]
+                num_cxt_subj_mask_selected = context_masks.sum(
+                    dim=1
+                ).min()  # Minimum to handle potentially non-uniform selections
+                context_subjets_mask = context_subjets_mask.view(
+                    subjets.shape[0], num_cxt_subj_mask_selected
+                )
+
+                target_subject_mask = subjet_mask[target_masks]
+                num_trg_subj_mask_selected = target_masks.sum(
+                    dim=1
+                ).min()  # Minimum to handle potentially non-uniform selections
+                target_subjets_mask = target_subject_mask.view(
+                    subjets.shape[0], num_trg_subj_mask_selected
+                )
+
                 with autocast(device_type="cuda", enabled=options.use_amp):
                     context = {
                         "subjets": selected_sub_j_context,
                         "particle_mask": particle_mask,
-                        "subjet_mask": subjet_mask * context_masks,
+                        "subjet_mask": context_subjets_mask,
                         "split_mask": context_masks,
                     }
                     target = {
                         "subjets": selected_sub_j_target,
                         "particle_mask": particle_mask,
-                        "subjet_mask": subjet_mask * target_masks,
+                        "subjet_mask": target_subjets_mask,
                         "split_mask": target_masks,
                     }
                     full_jet = {
