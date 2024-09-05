@@ -14,6 +14,7 @@ from torch.nn.parallel import DistributedDataParallel
 from torch.amp import GradScaler, autocast
 import torch.distributed as dist
 import time
+from tqdm import tqdm
 
 from src.options import Options
 from src.models.jjepa import JJEPA
@@ -28,7 +29,11 @@ logger = logging.getLogger(__name__)
 def parse_args():
     parser = argparse.ArgumentParser(description="Train JJEPA model")
     parser.add_argument(
-        "--config", type=str, required=True, help="Path to config JSON file"
+        "--config",
+        type=str,
+        required=True,
+        default="src/test_options.json",
+        help="Path to config JSON file",
     )
     parser.add_argument("--data_path", type=str, required=True, help="Path to dataset")
     parser.add_argument(
@@ -45,7 +50,11 @@ def setup_environment(rank):
     torch.distributed.init_process_group(backend="nccl", init_method="env://")
 
 
-def setup_data_loader(options, data_path, world_size, rank):
+def setup_data_loader(options, data_path, world_size, rank, tag="train"):
+    # TODO: verify path to dataset on the volume once NRP is functional
+    # dataset = JEPADataset(f"{data_path}/{tag}/...", num_jets=options.num_jets)
+    if tag == "val":
+        data_path = data_path.replace("train", "val")
     dataset = JEPADataset(data_path, num_jets=options.num_jets)
     sampler = torch.utils.data.distributed.DistributedSampler(
         dataset, num_replicas=world_size, rank=rank, shuffle=True
@@ -58,7 +67,7 @@ def setup_data_loader(options, data_path, world_size, rank):
         pin_memory=True,
         sampler=sampler,
     )
-    return loader, sampler
+    return loader, sampler, len(dataset)
 
 
 def create_random_masks(batch_size, num_subjets, device, context_scale=0.7):
@@ -85,12 +94,13 @@ def create_random_masks(batch_size, num_subjets, device, context_scale=0.7):
     return torch.stack(context_masks).bool(), torch.stack(target_masks).bool()
 
 
-def save_checkpoint(model, optimizer, epoch, loss, output_dir):
+def save_checkpoint(model, optimizer, epoch, loss_train, loss_val, output_dir):
     checkpoint = {
         "model": model.state_dict(),
         "optimizer": optimizer.state_dict(),
         "epoch": epoch,
-        "loss": loss,
+        "training loss": loss_train,
+        "validation loss": loss_val,
     }
     torch.save(
         checkpoint, os.path.join(output_dir, f"checkpoint_epoch_{epoch + 1}.pth")
@@ -181,8 +191,11 @@ def main(rank, world_size, args):
     if world_size > 1:
         model = DistributedDataParallel(model, device_ids=[rank])
 
-    train_loader, train_sampler = setup_data_loader(
-        options, args.data_path, world_size, rank
+    train_loader, train_sampler, train_dataset_size = setup_data_loader(
+        options, args.data_path, world_size, rank, tag="train"
+    )
+    val_loader, val_sampler, val_dataset_size = setup_data_loader(
+        options, args.data_path, world_size, rank, tag="val"
     )
 
     param_groups = [
@@ -239,9 +252,19 @@ def main(rank, world_size, args):
 
         if train_sampler:
             train_sampler.set_epoch(epoch)
+        if val_sampler:
+            val_sampler.set_epoch(epoch)
 
-        loss_meter = AverageMeter()
-        time_meter = AverageMeter()
+        loss_meter_train = AverageMeter()
+        loss_meter_val = AverageMeter()
+        time_meter_train = AverageMeter()
+        time_meter_val = AverageMeter()
+
+        pbar_t = tqdm(
+            train_loader,
+            total=int(train_dataset_size / options.batch_size),
+            desc="Training",
+        )
 
         for itr, (
             x,
@@ -250,7 +273,7 @@ def main(rank, world_size, args):
             particle_indices,
             subjet_mask,
             particle_mask,
-        ) in enumerate(train_loader):
+        ) in enumerate(pbar_t):
             x = x.to(dtype=torch.float32)
             x = x.to(device, non_blocking=True)
             x = x.view(
@@ -275,7 +298,7 @@ def main(rank, world_size, args):
 
             def train_step():
                 options = Options()
-                options.load("src/test_options.json")
+                options.load(args.config)
                 optimizer.zero_grad()
 
                 # print(" subjet", subjets.shape)
@@ -323,48 +346,146 @@ def main(rank, world_size, args):
 
                     pred_repr, target_repr = model(context, target, full_jet)
                     loss = nn.functional.mse_loss(pred_repr, target_repr)
-                    # print("context['subjets']", context['subjets'].shape)
-                    # print("target['subjets']", target['subjets'].shape)
-                    # print("full_jet['subjets']", full_jet['subjets'].shape)
-                    # print("sub_j_context", sub_j_context.shape)
-                    # print("sub_j_target", sub_j_target.shape)
-                if options.use_amp:
-                    scaler.scale(loss).backward()
-                    scaler.unscale_(optimizer)
-                    torch.nn.utils.clip_grad_norm_(
-                        model.parameters(), options.max_grad_norm
-                    )
-                    scaler.step(optimizer)
-                    scaler.update()
-                else:
-                    loss.backward()
-                    torch.nn.utils.clip_grad_norm_(
-                        model.parameters(), options.max_grad_norm
-                    )
-                    optimizer.step()
 
-                # Step 3. momentum update of target encoder
-                with torch.no_grad():
-                    m = next(momentum_scheduler)
-                    for param_q, param_k in zip(
-                        model.context_transformer.parameters(),
-                        model.target_transformer.parameters(),
-                    ):
-                        param_k.data.mul_(m).add_((1.0 - m) * param_q.detach().data)
+                    if options.use_amp:
+                        scaler.scale(loss).backward()
+                        scaler.unscale_(optimizer)
+                        torch.nn.utils.clip_grad_norm_(
+                            model.parameters(), options.max_grad_norm
+                        )
+                        scaler.step(optimizer)
+                        scaler.update()
+                    else:
+                        loss.backward()
+                        torch.nn.utils.clip_grad_norm_(
+                            model.parameters(), options.max_grad_norm
+                        )
+                        optimizer.step()
+
+                    # Step 3. momentum update of target encoder
+                    with torch.no_grad():
+                        m = next(momentum_scheduler)
+                        for param_q, param_k in zip(
+                            model.context_transformer.parameters(),
+                            model.target_transformer.parameters(),
+                        ):
+                            param_k.data.mul_(m).add_((1.0 - m) * param_q.detach().data)
 
                 return float(loss)
 
             loss, etime = gpu_timer(train_step)
-            loss_meter.update(loss)
-            time_meter.update(etime)
+            loss_meter_train.update(loss)
+            time_meter_train.update(etime)
 
             if itr % options.log_freq == 0:
                 logger.info(
-                    f"[{epoch + 1}, {itr}] loss: {loss_meter.avg:.3f} ({time_meter.avg:.1f} ms)"
+                    f"[{epoch + 1}, {itr}] training loss: {loss_meter_train.avg:.3f} ({time_meter_train.avg:.1f} ms)"
+                )
+        # validation
+        pbar_v = tqdm(
+            val_loader,
+            total=int(val_dataset_size / options.batch_size),
+            desc="Validation",
+        )
+
+        for itr, (
+            x,
+            particle_features,
+            subjets,
+            particle_indices,
+            subjet_mask,
+            particle_mask,
+        ) in enumerate(pbar_v):
+            x = x.to(dtype=torch.float32)
+            x = x.to(device, non_blocking=True)
+            x = x.view(
+                x.shape[0],
+                options.num_subjets,
+                options.num_particles * options.num_part_ftr,
+            )
+
+            particle_features = particle_features.to(device, non_blocking=True)
+            subjets = subjets.to(device, non_blocking=True)
+            particle_indices = particle_indices.to(device, non_blocking=True)
+            subjet_mask = subjet_mask.to(device, non_blocking=True)
+            particle_mask = particle_mask.to(device, non_blocking=True)
+
+            context_masks, target_masks = create_random_masks(
+                x.shape[0], options.num_subjets, device
+            )
+
+            def val_step():
+                options = Options()
+                options.load("src/test_options.json")
+                optimizer.zero_grad()
+
+                # print(" subjet", subjets.shape)
+                # print("context mask", context_masks.shape)
+                # print("target mask", target_masks.shape)
+
+                # remove the zeros and collapse it to the correct shape
+                sub_j_context = subjets[context_masks]
+                num_ctxt_selected = context_masks.sum(
+                    dim=1
+                ).min()  # Minimum to handle potentially non-uniform selections
+                selected_sub_j_context = sub_j_context.view(
+                    subjets.shape[0], num_ctxt_selected, subjets.shape[-1]
+                )
+                # print("sub_j_context", selected_sub_j_context.shape)
+
+                sub_j_target = subjets[target_masks]
+                num_tgt_selected = target_masks.sum(
+                    dim=1
+                ).min()  # Minimum to handle potentially non-uniform selections
+                selected_sub_j_target = sub_j_target.view(
+                    subjets.shape[0], num_tgt_selected, subjets.shape[-1]
+                )
+                # print("sub_j_target", selected_sub_j_target.shape)
+
+                with torch.no_grad():
+                    model.eval()
+                    context = {
+                        "subjets": selected_sub_j_context,
+                        "particle_mask": particle_mask,
+                        "subjet_mask": subjet_mask * context_masks,
+                        "split_mask": context_masks,
+                    }
+                    target = {
+                        "subjets": selected_sub_j_target,
+                        "particle_mask": particle_mask,
+                        "subjet_mask": subjet_mask * target_masks,
+                        "split_mask": target_masks,
+                    }
+                    full_jet = {
+                        "particles": x,
+                        "particle_mask": particle_mask,
+                        "subjet_mask": subjet_mask,
+                        "subjets": subjets,
+                    }
+
+                    pred_repr, target_repr = model(context, target, full_jet)
+                    loss = nn.functional.mse_loss(pred_repr, target_repr)
+
+                return float(loss)
+
+            loss_val, etime = gpu_timer(val_step)
+            loss_meter_val.update(loss_val)
+            time_meter_val.update(etime)
+
+            if itr % options.log_freq == 0:
+                logger.info(
+                    f"[{epoch + 1}, {itr}] val loss: {loss_meter_val.avg:.3f} ({time_meter_val.avg:.1f} ms)"
                 )
 
         scheduler.step()
-        save_checkpoint(model, optimizer, epoch, loss_meter.avg, args.output_dir)
+        save_checkpoint(
+            model,
+            optimizer,
+            epoch,
+            loss_meter_train.avg,
+            loss_meter_val,
+            args.output_dir,
+        )
 
 
 if __name__ == "__main__":
