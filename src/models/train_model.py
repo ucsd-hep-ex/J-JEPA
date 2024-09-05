@@ -420,11 +420,11 @@ def main(rank, world_size, args):
                 options.num_particles * options.num_part_ftr,
             )
 
-            particle_features = particle_features.to(device, non_blocking=True)
-            subjets = subjets.to(device, non_blocking=True)
-            particle_indices = particle_indices.to(device, non_blocking=True)
-            subjet_mask = subjet_mask.to(device, non_blocking=True)
-            particle_mask = particle_mask.to(device, non_blocking=True)
+            particle_features = particle_features.to(device, non_blocking=True, dtype=torch.float32)
+            subjets = subjets.to(device, non_blocking=True, dtype=torch.float32)
+            particle_indices = particle_indices.to(device, non_blocking=True, dtype=torch.float32)
+            subjet_mask = subjet_mask.to(device, non_blocking=True, dtype=torch.float32)
+            particle_mask = particle_mask.to(device, non_blocking=True, dtype=torch.float32)
 
             context_masks, target_masks = create_random_masks(
                 x.shape[0], options.num_subjets, device
