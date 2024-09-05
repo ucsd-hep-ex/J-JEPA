@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from src.layers.linear_block.activations import create_activation
 from src.layers.embedding_stack import EmbeddingStack, PredictorEmbeddingStack
 from src.util.positional_embedding import create_pos_emb_fn
 from src.options import Options
@@ -42,6 +43,7 @@ class Attention(nn.Module):
         self.W_qkv = nn.Linear(self.dim, self.dim * 3, bias=options.qkv_bias)
         self.attn_drop = nn.Dropout(options.attn_drop)
         self.proj = nn.Linear(self.dim, self.dim)
+        self.activation = create_activation(options.activation, self.dim)
         self.proj_drop = nn.Dropout(options.proj_drop)
 
         self.multihead_attn = nn.MultiheadAttention(self.dim, self.num_heads,
@@ -73,6 +75,7 @@ class Attention(nn.Module):
         x, _ = self.multihead_attn(q, k, v, key_padding_mask=subjet_masks)
 
         x = self.proj(x)
+        x = self.activation(x)
         x = self.proj_drop(x)
         if self.options.debug:
             print(f"Attention output shape: {x.shape}")
@@ -115,7 +118,7 @@ class Block(nn.Module):
             print("Initializing Block module")
         act_layer = ACTIVATION_LAYERS.get(options.activation, nn.GELU)
         norm_layer = NORM_LAYERS.get(options.normalization, nn.LayerNorm)
-        self.norm1 = norm_layer(options.emb_dim)
+        self.norm1 = norm_layer(options.repr_dim)
         self.dim = options.attn_dim
         self.attn = Attention(options)
 
@@ -154,6 +157,10 @@ class JetsTransformer(nn.Module):
         self.subjet_emb = EmbeddingStack(options,
                                          options.num_particles * options.num_part_ftr)
 
+        options.repr_dim = options.emb_dim
+        options.attn_dim = options.repr_dim
+        options.in_features = options.repr_dim
+        options.out_features = options.repr_dim
         self.blocks = nn.ModuleList(
             [Block(options=options) for _ in range(options.encoder_depth)]
         )
@@ -225,20 +232,22 @@ class JetsTransformerPredictor(nn.Module):
         self.init_std = options.init_std
         self.predictor_embed = PredictorEmbeddingStack(options,
                                                    input_dim = options.emb_dim)
-        self.calc_predictor_pos_emb = create_pos_emb_fn(options.repr_dim)
-        options.emb_dim = options.repr_dim
+        self.calc_predictor_pos_emb = create_pos_emb_fn(options.predictor_emb_dim)
+
+        options.repr_dim = options.predictor_emb_dim
         options.attn_dim = options.repr_dim
         options.in_features = options.repr_dim
         options.out_features = options.repr_dim
         self.predictor_blocks = nn.ModuleList(
             [Block(options=options) for _ in range(options.pred_depth)]
         )
-        self.predictor_norm = norm_layer(options.repr_dim)
+
+        self.predictor_norm = norm_layer(options.predictor_emb_dim)
         self.predictor_proj = nn.Linear(
-            options.repr_dim, options.repr_dim, bias=True
+            options.predictor_emb_dim, options.emb_dim, bias=True
         )  # Match target dimensions
         self.apply(self._init_weights)
-        self.mask_token = nn.Parameter(torch.zeros(1, 1, options.repr_dim))
+        self.mask_token = nn.Parameter(torch.zeros(1, 1, options.predictor_emb_dim))
         trunc_normal_(self.mask_token, std=self.init_std)
 
     def _init_weights(self, m):
