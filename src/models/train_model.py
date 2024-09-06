@@ -102,9 +102,7 @@ def save_checkpoint(model, optimizer, epoch, loss_train, loss_val, output_dir):
         "training loss": loss_train,
         "validation loss": loss_val,
     }
-    torch.save(
-        checkpoint, os.path.join(output_dir, f"checkpoint_epoch_{epoch + 1}.pth")
-    )
+    torch.save(checkpoint, os.path.join(output_dir, f"checkpoint.pth"))
 
 
 def setup_logging(rank, output_dir):
@@ -246,6 +244,9 @@ def main(rank, world_size, args):
     scaler = GradScaler()
 
     momentum_scheduler = create_momentum_scheduler(options)
+    losses_train = []
+    losses_val = []
+    lowest_val_loss = np.inf
 
     for epoch in range(options.start_epochs, options.num_epochs):
         logger.info("Epoch %d" % (epoch + 1))
@@ -486,6 +487,18 @@ def main(rank, world_size, args):
             loss_meter_val,
             args.output_dir,
         )
+        losses_train.append(loss_meter_train.avg)
+        losses_val.append(loss_meter_val.avg)
+        if loss_meter_val.avg < lowest_val_loss:
+            logger.info(f"new lowest val loss: {loss_meter_val.avg:.3f}")
+            logger.info("Saving best model")
+            lowest_val_loss = loss_meter_val.avg
+            torch.save(
+                model.state_dict(),
+                os.path.join(args.output_dir, "best_model.pth"),
+            )
+        np.save(os.path.join(args.output_dir, "train_losses.npy"), losses_train)
+        np.save(os.path.join(args.output_dir, "val_losses.npy"), losses_val)
 
 
 if __name__ == "__main__":
