@@ -166,6 +166,10 @@ class Options(Namespace):
         # This must be a valid class in torch.optim or nvidia apex with 'apex' prefix.
         self.optimizer: str = "AdamW"
 
+        # adjust eps to improve numerical stability
+        # reference https://pytorch.org/docs/stable/generated/torch.optim.Adam.html
+        self.eps: float = 1e-7
+
         # Optimizer learning rate.
         self.learning_rate: float = 0.001
 
