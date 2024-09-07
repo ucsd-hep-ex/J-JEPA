@@ -46,17 +46,18 @@ def load_data(dataset_path):
 
 
 def load_model(model_path=None, device="cpu"):
-    options = Options()
+    options = Options("src/test_options.json")
     model = JJEPA(options).to(device)
     if model_path:
         model.load_state_dict(torch.load(model_path, map_location=device))
+    print(model)
     return model
 
 
 def plot_losses(args):
     try:
-        losses_train = np.load(f"{args.model_output_path}/train_losses.npy")
-        losses_val = np.load(f"{args.model_output_path}/val_losses.npy")
+        losses_train = np.load(f"train_losses.npy")
+        losses_val = np.load(f"val_losses.npy")
     except:
         print("No losses found")
         return
@@ -90,8 +91,9 @@ def obtain_reps(net, dataloader, args):
             all_reps.append(reps)
             pbar.set_description(f"{i}")
         all_reps = torch.concatenate(all_reps)
-        all_reps = all_reps.view(all_reps.shape[0], -1)
+        # all_reps = all_reps.view(all_reps.shape[0], -1)
         all_reps = all_reps.sum(dim=1)
+        print(all_reps.shape)
     return all_reps
 
 
@@ -260,6 +262,8 @@ def split_data(dataloader):
 def do_pca(X):
     # Assuming X is your 1000-dimensional dataset with shape (n_samples, 1000)
     # Step 1: Standardize the data
+    print(f"Shape of X: {X.shape}")
+    print("started PCA")
     scaler = StandardScaler()
     X_standardized = scaler.fit_transform(X)
 
@@ -267,6 +271,8 @@ def do_pca(X):
     pca = PCA(n_components=8)
     X_pca = pca.fit_transform(X_standardized)
     # Now X_pca has the transformed data in the reduced dimensionality space
+    print(f"Explained variance ratio: {pca.explained_variance_ratio_}")
+    print(f"Explained variance: {pca.explained_variance_}")
     return X_pca
 
 
@@ -295,7 +301,7 @@ def main(args):
     args.device = device
 
     dataloader = load_data(args.dataset_path)
-    model = load_model(args.load_jjepa_path, args)
+    model = load_model(args.load_jjepa_path)
     context_encoder = model.context_transformer
     target_encoder = model.target_transformer
     print("-------------------")
