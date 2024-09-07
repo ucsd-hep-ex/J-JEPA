@@ -254,6 +254,7 @@ class Options(Namespace):
         # number of val jets
         self.num_val_jets: int = 10000
 
+
     def display(self):
         try:
             from rich import get_console
