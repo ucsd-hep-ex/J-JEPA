@@ -308,12 +308,12 @@ class Options(Namespace):
             }:
                 continue
 
-            if key in integer_options:
-                setattr(self, key, int(value))
+            if key in boolean_options:
+                setattr(self, key, bool(value))
             elif key in float_options:
                 setattr(self, key, float(value))
-            elif key in boolean_options:
-                setattr(self, key, bool(value))
+            elif key in integer_options:
+                setattr(self, key, int(value))
             else:
                 setattr(self, key, value)
 

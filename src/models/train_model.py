@@ -207,9 +207,7 @@ def main(rank, world_size, args):
         setup_environment(rank)
     device = torch.device(f"cuda:{rank}" if torch.cuda.is_available() else "cpu")
 
-    options = Options()
-    with open(args.config, 'r') as json_file:
-        options.update_options(json.load(json_file))
+    options = Options.load(args.config)
     setup_logging(rank, args.output_dir)
     logger.info(f"Initialized (rank/world-size) {rank}/{world_size}")
 
@@ -334,9 +332,7 @@ def main(rank, world_size, args):
                 param_group["momentum"] = current_momentum
 
             def train_step():
-                options = Options()
-                with open(args.config, 'r') as json_file:
-                    options.update_options(json.load(json_file))
+                options = Options.load(args.config)
                 optimizer.zero_grad()
 
                 # print(" subjet", subjets.shape)
@@ -473,11 +469,9 @@ def main(rank, world_size, args):
             )
 
             def val_step():
-                options = Options()
-
                 test_option_path = "/mnt/d/physic/I-JEPA-Jets-Subash/src/test_options.json"
-                with open(test_option_path, 'r') as json_file:
-                    options.update_options(json.load(json_file))
+                options = Options.load(test_option_path)
+
                 optimizer.zero_grad()
 
                 # print(" subjet", subjets.shape)
