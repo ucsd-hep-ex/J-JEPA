@@ -91,8 +91,12 @@ def obtain_reps(net, dataloader, args):
             all_reps.append(reps)
             pbar.set_description(f"{i}")
         all_reps = torch.concatenate(all_reps)
-        # all_reps = all_reps.view(all_reps.shape[0], -1)
-        all_reps = all_reps.sum(dim=1)
+        if args.flatten:
+            all_reps = all_reps.view(all_reps.shape[0], -1)
+        elif args.sum:
+            all_reps = all_reps.sum(dim=1)
+        else:
+            raise ValueError("No aggregation method specified")
         print(all_reps.shape)
     return all_reps
 
@@ -290,6 +294,8 @@ def plot_pca(args, net, label, dataloader):
 
 
 def main(args):
+    print(f"args.flatten: {args.flatten}")
+    print(f"args.sum: {args.sum}")
     world_size = torch.cuda.device_count()
     if world_size:
         device = torch.device("cuda:0")
@@ -375,6 +381,20 @@ if __name__ == "__main__":
         dest="batch_size",
         default=2048,
         help="batch_size",
+    )
+    parser.add_argument(
+        "--flatten",
+        type=int,
+        action="store",
+        default=0,
+        help="flatten the representation",
+    )
+    parser.add_argument(
+        "--sum",
+        type=int,
+        action="store",
+        default=1,
+        help="sum the representation",
     )
 
     args = parser.parse_args()
