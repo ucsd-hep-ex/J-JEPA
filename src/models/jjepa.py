@@ -46,8 +46,9 @@ class Attention(nn.Module):
         self.activation = create_activation(options.activation, self.dim)
         self.proj_drop = nn.Dropout(options.proj_drop)
 
-        self.multihead_attn = nn.MultiheadAttention(self.dim, self.num_heads,
-                                                    batch_first=True)
+        self.multihead_attn = nn.MultiheadAttention(
+            self.dim, self.num_heads, batch_first=True
+        )
 
     def forward(self, x, subjet_masks):
         if self.options.debug:
@@ -61,11 +62,7 @@ class Attention(nn.Module):
         #     .reshape(B, N, 3, self.num_heads, C // self.num_heads)
         #     .permute(2, 0, 3, 1, 4)
         # )
-        qkv = (
-            self.W_qkv(x)
-            .reshape(B, N, 3, C)
-            .permute(2, 0, 1, 3)
-        )
+        qkv = self.W_qkv(x).reshape(B, N, 3, C).permute(2, 0, 1, 3)
         q, k, v = qkv[0], qkv[1], qkv[2]
         # attn = (q @ k.transpose(-2, -1)) * self.scale
         # attn = attn.softmax(dim=-1)
@@ -130,7 +127,6 @@ class Block(nn.Module):
         options.hidden_features = mlp_hidden_dim
         self.mlp = MLP(options)
 
-
     def forward(self, x, subjet_masks):
         if self.options.debug:
             print(f"Block forward pass with input shape: {x.shape}")
@@ -154,8 +150,9 @@ class JetsTransformer(nn.Module):
         self.calc_pos_emb = create_pos_emb_fn(options.emb_dim)
 
         # Adjust the input dimensions based on the new input shape
-        self.subjet_emb = EmbeddingStack(options,
-                                         options.num_particles * options.num_part_ftr)
+        self.subjet_emb = EmbeddingStack(
+            options, options.num_particles * options.num_part_ftr
+        )
 
         options.repr_dim = options.emb_dim
         options.attn_dim = options.repr_dim
@@ -210,16 +207,16 @@ class JetsTransformer(nn.Module):
 
         # norm
         x = self.norm(x)
+        if split_mask:
+            # select indices of certain subjet representations from split_mask
+            selected_subjets = x[split_mask.unsqueeze(-1).expand(-1, -1, x.shape[-1])]
 
-        # select indices of certain subjet representations from split_mask
-        selected_subjets = x[split_mask.unsqueeze(-1).expand(-1, -1, x.shape[-1])]
-
-        num_selected = split_mask.sum(
-            dim=1
-        ).min()  # Minimum to handle potentially non-uniform selections
-        selected_subjets = selected_subjets.view(B, num_selected, x.shape[-1])
-
-        return selected_subjets
+            num_selected = split_mask.sum(
+                dim=1
+            ).min()  # Minimum to handle potentially non-uniform selections
+            selected_subjets = selected_subjets.view(B, num_selected, x.shape[-1])
+            return selected_subjets
+        return x
 
 
 class JetsTransformerPredictor(nn.Module):
@@ -230,8 +227,9 @@ class JetsTransformerPredictor(nn.Module):
             print("Initializing JetsTransformerPredictor module")
         norm_layer = NORM_LAYERS.get(options.normalization, nn.LayerNorm)
         self.init_std = options.init_std
-        self.predictor_embed = PredictorEmbeddingStack(options,
-                                                   input_dim = options.emb_dim)
+        self.predictor_embed = PredictorEmbeddingStack(
+            options, input_dim=options.emb_dim
+        )
         self.calc_predictor_pos_emb = create_pos_emb_fn(options.predictor_emb_dim)
 
         options.repr_dim = options.predictor_emb_dim
@@ -298,7 +296,9 @@ class JetsTransformerPredictor(nn.Module):
         x = x.repeat(N_trgt, 1, 1)
 
         x = torch.cat([x, pred_token], axis=1)
+
         subjet_masks = torch.cat([subjet_masks, torch.ones((B,1)).to(subjet_masks.device)], axis=1)
+
         subjet_masks = subjet_masks.repeat(N_trgt, 1)
 
         for blk in self.predictor_blocks:
@@ -355,7 +355,10 @@ class JJEPA(nn.Module):
         if self.options.debug:
             print(f"JJEPA forward pass")
         context_repr = self.context_transformer(
-            full_jet, full_jet["subjet_mask"], full_jet["subjets"], context["split_mask"]
+            full_jet,
+            full_jet["subjet_mask"],
+            full_jet["subjets"],
+            context["split_mask"],
         )
         # Debug Statement
         if self.options.debug:
