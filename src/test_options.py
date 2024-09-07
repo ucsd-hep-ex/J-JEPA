@@ -10,6 +10,5 @@ if __name__ == "__main__":
     options.display()
 
     base_options_file = "mock_config.json"
-    with open(base_options_file, 'r') as json_file:
-        options.update_options(json.load(json_file))
+    options.update(base_options_file)
     options.display()
