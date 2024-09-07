@@ -19,8 +19,10 @@ def create_mock_data(options, tmp_path):
     num_particles = options.num_particles
     num_features = options.num_part_ftr
 
-    train_file_path = tmp_path / "train_mock_dataset.h5"
-    val_file_path = tmp_path / "val_mock_dataset.h5"
+
+    train_file_path = tmp_path / "processed_train_20_30_torch.h5"
+    val_file_path = tmp_path / "processed_val_20_val_30_torch.h5"
+
     with h5py.File(train_file_path, "w") as f:
         f.create_dataset(
             "x",
@@ -62,12 +64,14 @@ def create_mock_data(options, tmp_path):
 
 
 def test_train_model():
-    tmp_path = Path("./tmp_test_output")
+
+    tmp_path = Path("/mnt/d/physic/data/")
+
     tmp_path.mkdir(exist_ok=True)
 
     config_path = tmp_path / "mock_config.json"
     options = Options()
-    options.num_jets = 1000
+
     options.num_subjets = 20
     options.num_particles = 30
     options.num_part_ftr = 4
@@ -97,6 +101,8 @@ def test_train_model():
         data_path,
         "--output_dir",
         str(tmp_path),
+        "--load_checkpoint",
+        "/mnt/d/physics/data/best_model.pth"
     ]
 
     args = parse_args()

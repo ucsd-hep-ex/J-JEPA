@@ -166,6 +166,10 @@ class Options(Namespace):
         # This must be a valid class in torch.optim or nvidia apex with 'apex' prefix.
         self.optimizer: str = "AdamW"
 
+        # adjust eps to improve numerical stability
+        # reference https://pytorch.org/docs/stable/generated/torch.optim.Adam.html
+        self.eps: float = 1e-7
+
         # Optimizer learning rate.
         self.learning_rate: float = 0.001
 
@@ -251,6 +255,10 @@ class Options(Namespace):
         # debug mode
         self.debug: bool = False
 
+        # number of val jets
+        self.num_val_jets: int = 10000
+
+
     def display(self):
         try:
             from rich import get_console
@@ -300,12 +308,12 @@ class Options(Namespace):
             }:
                 continue
 
-            if key in integer_options:
-                setattr(self, key, int(value))
+            if key in boolean_options:
+                setattr(self, key, bool(value))
             elif key in float_options:
                 setattr(self, key, float(value))
-            elif key in boolean_options:
-                setattr(self, key, bool(value))
+            elif key in integer_options:
+                setattr(self, key, int(value))
             else:
                 setattr(self, key, value)
 
