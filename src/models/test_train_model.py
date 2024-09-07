@@ -101,6 +101,8 @@ def test_train_model():
         data_path,
         "--output_dir",
         str(tmp_path),
+        "--load_checkpoint",
+        "/mnt/d/physics/data/best_model.pth"
     ]
 
     args = parse_args()
