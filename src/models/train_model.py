@@ -16,6 +16,9 @@ import torch.distributed as dist
 import time
 from tqdm import tqdm
 
+import torch.cuda as cuda
+
+
 from src.options import Options
 from src.models.jjepa import JJEPA
 from src.dataset.JEPADataset import JEPADataset
@@ -32,7 +35,9 @@ def parse_args():
         "--config",
         type=str,
         required=True,
-        default="src/test_options.json",
+
+        default="/mnt/d/physic/I-JEPA-Jets-Subash/src/test_options.json",
+
         help="Path to config JSON file",
     )
     parser.add_argument("--data_path", type=str, required=True, help="Path to dataset")
@@ -55,7 +60,10 @@ def setup_data_loader(options, data_path, world_size, rank, tag="train"):
     # dataset = JEPADataset(f"{data_path}/{tag}/...", num_jets=options.num_jets)
     if tag == "val":
         data_path = data_path.replace("train", "val")
-    dataset = JEPADataset(data_path, num_jets=options.num_jets)
+        dataset = JEPADataset(data_path, num_jets=options.num_val_jets)
+    else:
+        dataset = JEPADataset(data_path, num_jets=options.num_jets)
+        
     sampler = torch.utils.data.distributed.DistributedSampler(
         dataset, num_replicas=world_size, rank=rank, shuffle=True
     )
@@ -102,9 +110,11 @@ def save_checkpoint(model, optimizer, epoch, loss_train, loss_val, output_dir):
         "training loss": loss_train,
         "validation loss": loss_val,
     }
+
     torch.save(
         checkpoint, os.path.join(output_dir, f"checkpoint_epoch_{epoch + 1}.pth")
     )
+
 
 
 def setup_logging(rank, output_dir):
@@ -177,10 +187,22 @@ def gpu_timer(closure):
     return result, elapsed_time
 
 
+def log_gpu_stats(device):
+    if torch.cuda.is_available():
+        memory_allocated = torch.cuda.memory_allocated(device) / 1024**3  # Converted to GB
+        memory_reserved = torch.cuda.memory_reserved(device) / 1024**3
+        utilization = cuda.utilization(device)
+        logger.info(f"GPU Memory Allocated: {memory_allocated:.2f} GB")
+        logger.info(f"GPU Memory Reserved: {memory_reserved:.2f} GB")
+        logger.info(f"GPU Utilization: {utilization}%")
+
+
+
 def main(rank, world_size, args):
     if world_size > 1:
         setup_environment(rank)
     device = torch.device(f"cuda:{rank}" if torch.cuda.is_available() else "cpu")
+
     options = Options()
     options.load(args.config)
     setup_logging(rank, args.output_dir)
@@ -246,6 +268,11 @@ def main(rank, world_size, args):
     scaler = GradScaler()
 
     momentum_scheduler = create_momentum_scheduler(options)
+    
+    losses_train = []
+    losses_val = []
+    lowest_val_loss = np.inf
+
 
     for epoch in range(options.start_epochs, options.num_epochs):
         logger.info("Epoch %d" % (epoch + 1))
@@ -342,22 +369,24 @@ def main(rank, world_size, args):
 
                 with autocast(device_type="cuda", enabled=options.use_amp):
                     context = {
-                        "subjets": selected_sub_j_context,
-                        "particle_mask": particle_mask,
-                        "subjet_mask": context_subjets_mask,
-                        "split_mask": context_masks,
+
+                        "subjets": selected_sub_j_context.to(device),
+                        "particle_mask": particle_mask.to(device),
+                        "subjet_mask": context_subjets_mask.to(device),
+                        "split_mask": context_masks.to(device),
                     }
                     target = {
-                        "subjets": selected_sub_j_target,
-                        "particle_mask": particle_mask,
-                        "subjet_mask": target_subjets_mask,
-                        "split_mask": target_masks,
+                        "subjets": selected_sub_j_target.to(device),
+                        "particle_mask": particle_mask.to(device),
+                        "subjet_mask": target_subjets_mask.to(device),
+                        "split_mask": target_masks.to(device),
                     }
                     full_jet = {
                         "particles": x,
-                        "particle_mask": particle_mask,
-                        "subjet_mask": subjet_mask,
-                        "subjets": subjets,
+                        "particle_mask": particle_mask.to(device),
+                        "subjet_mask": subjet_mask.to(device),
+                        "subjets": subjets.to(device),
+
                     }
 
                     pred_repr, target_repr = model(context, target, full_jet)
@@ -397,6 +426,8 @@ def main(rank, world_size, args):
                 logger.info(
                     f"[{epoch + 1}, {itr}] training loss: {loss_meter_train.avg:.3f} ({time_meter_train.avg:.1f} ms)"
                 )
+                log_gpu_stats(device)
+
         # validation
         pbar_v = tqdm(
             val_loader,
@@ -432,7 +463,8 @@ def main(rank, world_size, args):
 
             def val_step():
                 options = Options()
-                options.load("src/test_options.json")
+
+                options.load("/mnt/d/physic/I-JEPA-Jets-Subash/src/test_options.json")
                 optimizer.zero_grad()
 
                 # print(" subjet", subjets.shape)
@@ -478,22 +510,23 @@ def main(rank, world_size, args):
                 with torch.no_grad():
                     model.eval()
                     context = {
-                        "subjets": selected_sub_j_context,
-                        "particle_mask": particle_mask,
-                        "subjet_mask": context_subjets_mask,
-                        "split_mask": context_masks,
+
+                        "subjets": selected_sub_j_context.to(device),
+                        "particle_mask": particle_mask.to(device),
+                        "subjet_mask": context_subjets_mask.to(device),
+                        "split_mask": context_masks.to(device),
                     }
                     target = {
-                        "subjets": selected_sub_j_target,
-                        "particle_mask": particle_mask,
-                        "subjet_mask": target_subjets_mask,
-                        "split_mask": target_masks,
+                        "subjets": selected_sub_j_target.to(device),
+                        "particle_mask": particle_mask.to(device),
+                        "subjet_mask": target_subjets_mask.to(device),
+                        "split_mask": target_masks.to(device),
                     }
                     full_jet = {
                         "particles": x,
-                        "particle_mask": particle_mask,
-                        "subjet_mask": subjet_mask,
-                        "subjets": subjets,
+                        "particle_mask": particle_mask.to(device),
+                        "subjet_mask": subjet_mask.to(device),
+                        "subjets": subjets.to(device),
                     }
 
                     pred_repr, target_repr = model(context, target, full_jet)
@@ -519,6 +552,19 @@ def main(rank, world_size, args):
             loss_meter_val,
             args.output_dir,
         )
+
+        losses_train.append(loss_meter_train.avg)
+        losses_val.append(loss_meter_val.avg)
+        if loss_meter_val.avg < lowest_val_loss:
+            logger.info(f"new lowest val loss: {loss_meter_val.avg:.3f}")
+            logger.info("Saving best model")
+            lowest_val_loss = loss_meter_val.avg
+            torch.save(
+                model.state_dict(),
+                os.path.join(args.output_dir, "best_model.pth"),
+            )
+        np.save(os.path.join(args.output_dir, "train_losses.npy"), losses_train)
+        np.save(os.path.join(args.output_dir, "val_losses.npy"), losses_val)
 
 
 if __name__ == "__main__":
