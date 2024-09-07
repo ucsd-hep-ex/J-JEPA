@@ -44,6 +44,9 @@ def parse_args():
     parser.add_argument(
         "--output_dir", type=str, default="output", help="Output directory"
     )
+    parser.add_argument(
+        "--load_checkpoint", type=str, default=None, help="Start training from a saved checkpoint"
+    )
     return parser.parse_args()
 
 
@@ -63,7 +66,7 @@ def setup_data_loader(options, data_path, world_size, rank, tag="train"):
         dataset = JEPADataset(data_path, num_jets=options.num_val_jets)
     else:
         dataset = JEPADataset(data_path, num_jets=options.num_jets)
-        
+
     sampler = torch.utils.data.distributed.DistributedSampler(
         dataset, num_replicas=world_size, rank=rank, shuffle=True
     )
@@ -209,7 +212,9 @@ def main(rank, world_size, args):
     logger.info(f"Initialized (rank/world-size) {rank}/{world_size}")
 
     model = JJEPA(options).to(device)
-    model = model.to(dtype=torch.float32)
+    model = model.to(dtype=torch.float32)'
+    if load_checkpoint:
+        model.load_state_dict(torch.load(load_checkpoint, map_location=device))
     if world_size > 1:
         model = DistributedDataParallel(model, device_ids=[rank])
 
@@ -257,7 +262,10 @@ def main(rank, world_size, args):
 
     logger.info("Using AdamW")
     optimizer = optim.AdamW(
-        param_groups, lr=options.lr, weight_decay=options.weight_decay
+        param_groups,
+        lr=options.lr,
+        weight_decay=options.weight_decay,
+        eps=options.eps,
     )
     # optimizer = optim.AdamW(
     #     model.parameters(), lr=options.lr, weight_decay=options.weight_decay
@@ -268,7 +276,7 @@ def main(rank, world_size, args):
     scaler = GradScaler()
 
     momentum_scheduler = create_momentum_scheduler(options)
-    
+
     losses_train = []
     losses_val = []
     lowest_val_loss = np.inf
