@@ -213,8 +213,8 @@ def main(rank, world_size, args):
 
     model = JJEPA(options).to(device)
     model = model.to(dtype=torch.float32)
-    if load_checkpoint:
-        model.load_state_dict(torch.load(load_checkpoint, map_location=device))
+    if args.load_checkpoint:
+        model.load_state_dict(torch.load(args.load_checkpoint, map_location=device))
     if world_size > 1:
         model = DistributedDataParallel(model, device_ids=[rank])
 
