@@ -3,6 +3,7 @@ import sys
 import logging
 import argparse
 from pathlib import Path
+import json
 
 import numpy as np
 
@@ -207,7 +208,8 @@ def main(rank, world_size, args):
     device = torch.device(f"cuda:{rank}" if torch.cuda.is_available() else "cpu")
 
     options = Options()
-    options.load(args.config)
+    with open(args.config, 'r') as json_file:
+        options.update_options(json.load(json_file))
     setup_logging(rank, args.output_dir)
     logger.info(f"Initialized (rank/world-size) {rank}/{world_size}")
 
@@ -333,7 +335,8 @@ def main(rank, world_size, args):
 
             def train_step():
                 options = Options()
-                options.load(args.config)
+                with open(args.config, 'r') as json_file:
+                    options.update_options(json.load(json_file))
                 optimizer.zero_grad()
 
                 # print(" subjet", subjets.shape)
@@ -472,7 +475,9 @@ def main(rank, world_size, args):
             def val_step():
                 options = Options()
 
-                options.load("/mnt/d/physic/I-JEPA-Jets-Subash/src/test_options.json")
+                test_option_path = "/mnt/d/physic/I-JEPA-Jets-Subash/src/test_options.json"
+                with open(test_option_path, 'r') as json_file:
+                    options.update_options(json.load(json_file))
                 optimizer.zero_grad()
 
                 # print(" subjet", subjets.shape)
