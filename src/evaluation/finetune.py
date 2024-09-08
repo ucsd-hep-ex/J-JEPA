@@ -52,9 +52,15 @@ def Projector(mlp, embedding):
 
 
 # load data
-def load_data(dataset_path):
+def load_data(dataset_path, tag=None):
     # data_dir = f"{dataset_path}/{flag}/processed/4_features"
-    datset = JetDataset(dataset_path, labels=True)
+    if tag == "train":
+        num_jets = 100 * 1000
+    elif tag == "val":
+        num_jets = 10 * 1000
+    else:
+        raise ValueError("tag must be either train or val")
+    datset = JetDataset(dataset_path, labels=True, num_jets=num_jets)
     dataloader = DataLoader(datset, batch_size=args.batch_size, shuffle=True)
     return dataloader
 
@@ -133,8 +139,8 @@ def main(args):
     print(f"finetune: {args.finetune}", file=logfile, flush=True)
 
     print("loading data")
-    train_dataloader = load_data(args.train_dataset_path)
-    val_dataloader = load_data(args.val_dataset_path)
+    train_dataloader = load_data(args.train_dataset_path, "train")
+    val_dataloader = load_data(args.val_dataset_path, "val")
 
     t1 = time.time()
 
@@ -227,7 +233,7 @@ def main(args):
         # validation
         with torch.no_grad():
             proj.eval()
-            pbar = tqdm(train_dataloader)
+            pbar = tqdm(val_dataloader)
             for i, (x, _, subjets, _, subjet_mask, _, labels) in enumerate(pbar):
                 y = labels.to(args.device)
             x = x.view(x.shape[0], x.shape[1], -1)
