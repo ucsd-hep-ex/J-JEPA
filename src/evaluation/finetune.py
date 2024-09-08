@@ -66,7 +66,7 @@ def load_data(dataset_path, tag=None):
 
 
 def load_model(model_path=None, device="cpu"):
-    options = Options(args.option_file)
+    options = Options.load(args.option_file)
     model = JJEPA(options).to(device)
     if model_path:
         model.load_state_dict(torch.load(model_path, map_location=device))
