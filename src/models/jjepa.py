@@ -207,7 +207,7 @@ class JetsTransformer(nn.Module):
 
         # norm
         x = self.norm(x)
-        if split_mask:
+        if split_mask != None:
             # select indices of certain subjet representations from split_mask
             selected_subjets = x[split_mask.unsqueeze(-1).expand(-1, -1, x.shape[-1])]
 
