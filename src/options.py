@@ -171,7 +171,7 @@ class Options(Namespace):
         self.eps: float = 1e-7
 
         # Optimizer learning rate.
-        self.learning_rate: float = 0.001
+        self.learning_rate: float = 0.0001
 
         # Weight decay for optimizer
         self.weight_decay: float = 0.01
@@ -212,7 +212,7 @@ class Options(Namespace):
         # =========================================================================================
 
         # Number of jets to use in training
-        self.num_jets: int = 100000
+        self.num_jets: int = None
 
         # Number of worker processes for data loading
         self.num_workers: int = 0
@@ -256,7 +256,7 @@ class Options(Namespace):
         self.debug: bool = False
 
         # number of val jets
-        self.num_val_jets: int = 10000
+        self.num_val_jets: int = None
 
 
     def display(self):

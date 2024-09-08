@@ -101,15 +101,19 @@ def obtain_reps(net, dataloader, args):
     return all_reps
 
 
-def plot_tsne(args, net, label, dataloader):
+def plot_tsne(args, net, label, dataloader, n_pca=None):
     # Assuming your data tensor is named 'data' and has a shape of [num_samples, emb_dim]
     # Flatten the data if needed and convert it to numpy
+    data_test = obtain_reps(net, dataloader, args)
+    if n_pca is not None:
+        data_test = do_pca(data_test, n_components=n_pca)
+        
     data_test = obtain_reps(net, dataloader, args)
     data_numpy = data_test.to("cpu").numpy()
     labels_numpy = torch.cat([batch[-1] for batch in dataloader], dim=0).numpy()
 
-    for perp in range(5, 60, 5):
-        for n_iter in range(2000, 6000, 1000):
+    for perp in reversed(range(5, 60, 5)):
+        for n_iter in [5000]:
             print(f"perp: {perp}, n_iter: {n_iter}")
             # Apply t-SNE
             tsne = TSNE(
@@ -276,16 +280,17 @@ def split_data(dataloader):
     return signal_dataloader, background_dataloader
 
 
-def do_pca(X):
+def do_pca(X, n_components=8):
     # Assuming X is your 1000-dimensional dataset with shape (n_samples, 1000)
     # Step 1: Standardize the data
     print(f"Shape of X: {X.shape}")
     print("started PCA")
     scaler = StandardScaler()
+    X = X.cpu()
     X_standardized = scaler.fit_transform(X)
 
     # Step 2: Apply PCA to reduce dimensionality to 8 components
-    pca = PCA(n_components=8)
+    pca = PCA(n_components=n_components)
     X_pca = pca.fit_transform(X_standardized)
     # Now X_pca has the transformed data in the reduced dimensionality space
     print(f"Explained variance ratio: {pca.explained_variance_ratio_}")
@@ -329,13 +334,13 @@ def main(args):
     print("-------------------")
     # plot t-SNE
     print("Making t-SNE plots")
-    plot_tsne(args, context_encoder, "context", dataloader)
-    plot_tsne(args, target_encoder, "target", dataloader)
+    plot_tsne(args, context_encoder, "context", dataloader, n_pca=50)
+    plot_tsne(args, target_encoder, "target", dataloader, n_pca=50)
     print("-------------------")
     # plot PCA
     print("Making PCA plots")
-    plot_pca(args, context_encoder, "context", dataloader)
-    plot_pca(args, target_encoder, "target", dataloader)
+    plot_pca(args, context_encoder, "context")
+    plot_pca(args, target_encoder, "target")
     print("-------------------")
     print("Evaluation complete")
 

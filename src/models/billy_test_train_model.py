@@ -14,15 +14,15 @@ import torch.multiprocessing as mp
 
 
 def get_data_path(path):
-    train_data_path = path / "processed_train_20_30_torch.h5"
+    train_data_path = path / "processed_train_20_30_torch_new.h5"
     return str(train_data_path)
 
 
 def test_train_model():
 
     # if you want to change the data path, you can do so here --- change data path
-    tmp_path = Path("/mnt/d/physic/output_with_eps/")
-    checkpoint_path = None
+    tmp_path = Path("/mnt/d/physic/output_without_eps/")
+    checkpoint_path = Path("/mnt/d/physic/output_without_eps/best_model.pth")
 
     
     tmp_path.mkdir(exist_ok=True)
@@ -38,7 +38,7 @@ def test_train_model():
     options.num_epochs = 300
     options.num_workers = 0
 
-    options.lr = 1e-4
+    options.learning_rate = 1e-4
     options.base_momentum = 0.99
     options.max_grad_norm = 1.0
 
