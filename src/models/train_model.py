@@ -409,9 +409,9 @@ def main(rank, world_size, args):
                         scaler.update()
                     else:
                         loss.backward()
-                        torch.nn.utils.clip_grad_norm_(
-                            model.parameters(), options.max_grad_norm
-                        )
+                        # torch.nn.utils.clip_grad_norm_(
+                        #     model.parameters(), options.max_grad_norm
+                        # )
                         optimizer.step()
 
                     # Step 3. momentum update of target encoder
@@ -433,7 +433,7 @@ def main(rank, world_size, args):
                 logger.info(
                     f"[{epoch + 1}, {itr}] training loss: {loss_meter_train.avg:.3f} ({time_meter_train.avg:.1f} ms)"
                 )
-                log_gpu_stats(device)
+                # log_gpu_stats(device)
 
         # validation
         pbar_v = tqdm(
