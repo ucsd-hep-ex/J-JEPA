@@ -208,6 +208,8 @@ def main(rank, world_size, args):
     device = torch.device(f"cuda:{rank}" if torch.cuda.is_available() else "cpu")
 
     options = Options.load(args.config)
+    options.num_steps_per_epoch = options.num_jets // options.batch_size
+
     setup_logging(rank, args.output_dir)
     logger.info(f"Initialized (rank/world-size) {rank}/{world_size}")
 

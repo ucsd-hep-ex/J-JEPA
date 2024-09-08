@@ -247,7 +247,7 @@ class Options(Namespace):
         self.max_grad_norm: float = 0.1
 
         # number of steps per epoch
-        self.num_steps_per_epoch: int = self.num_jets // self.batch_size
+        self.num_steps_per_epoch: int = None 
 
         # number of steps per epoch
         self.log_freq: int = 10
