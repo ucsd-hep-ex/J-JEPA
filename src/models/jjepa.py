@@ -297,7 +297,9 @@ class JetsTransformerPredictor(nn.Module):
 
         x = torch.cat([x, pred_token], axis=1)
 
-        subjet_masks = torch.cat([subjet_masks, torch.ones((B,1)).to(subjet_masks.device)], axis=1)
+        subjet_masks = torch.cat(
+            [subjet_masks, torch.ones((B, 1)).to(subjet_masks.device)], axis=1
+        )
 
         subjet_masks = subjet_masks.repeat(N_trgt, 1)
 
