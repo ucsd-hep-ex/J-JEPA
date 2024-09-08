@@ -409,9 +409,9 @@ def main(rank, world_size, args):
                         scaler.update()
                     else:
                         loss.backward()
-                        torch.nn.utils.clip_grad_norm_(
-                            model.parameters(), options.max_grad_norm
-                        )
+                        # torch.nn.utils.clip_grad_norm_(
+                        #     model.parameters(), options.max_grad_norm
+                        # )
                         optimizer.step()
 
                     # Step 3. momentum update of target encoder

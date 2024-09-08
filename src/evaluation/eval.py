@@ -46,7 +46,7 @@ def load_data(dataset_path):
 
 
 def load_model(model_path=None, device="cpu"):
-    options = Options("src/test_options.json")
+    options = Options.load("/mnt/d/physic/billy_output/mock_config.json")
     model = JJEPA(options).to(device)
     if model_path:
         model.load_state_dict(torch.load(model_path, map_location=device))
@@ -80,7 +80,7 @@ def obtain_reps(net, dataloader, args):
         all_reps = []
         pbar = tqdm.tqdm(dataloader)
         for i, (x, _, subjets, _, subjet_mask, _, labels) in enumerate(pbar):
-            x = x.view(x.shape[0], x.shape[1], -1)
+            x = x.view(x.shape[0], x.shape[1], -1).to(args.device)
             batch = {"particles": x.to(torch.float32)}
             reps = net(
                 batch,
@@ -106,36 +106,49 @@ def plot_tsne(args, net, label, dataloader):
     # Flatten the data if needed and convert it to numpy
     data_test = obtain_reps(net, dataloader, args)
     data_numpy = data_test.to("cpu").numpy()
-
-    # Apply t-SNE
-    tsne = TSNE(
-        n_components=2, perplexity=30, n_iter=300
-    )  # you can change these hyperparameters as needed
-    tsne_results = tsne.fit_transform(data_numpy)
-
-    # tsne_results now has a shape of [num_samples, 2], and you can plot it
-
     labels_numpy = torch.cat([batch[-1] for batch in dataloader], dim=0).numpy()
-    # Use boolean indexing to separate points for each label
-    top_points = tsne_results[labels_numpy == 1]
-    qcd_points = tsne_results[labels_numpy == 0]
 
-    plt.figure(figsize=(10, 10))
-    ax = plt.gca()
-    # Plot each class with a different color and label
-    plt.scatter(
-        top_points[:, 0], top_points[:, 1], color="b", alpha=0.5, label="top", s=1
-    )
-    plt.scatter(
-        qcd_points[:, 0], qcd_points[:, 1], color="y", alpha=0.5, label="QCD", s=1
-    )
-    ax.set_yticklabels([])
-    ax.set_xticklabels([])
-    plt.title("t-SNE visualization of jet features")
-    plt.legend(loc="upper right")  # place the legend at the upper right corner
-    plt.savefig(f"{args.eval_path}/tsne_{label}.png", dpi=300)
-    # plt.show()
-    plt.close()
+    for perp in range(5, 60, 5):
+        for n_iter in range(2000, 6000, 1000):
+            print(f"perp: {perp}, n_iter: {n_iter}")
+            # Apply t-SNE
+            tsne = TSNE(
+                n_components=2, perplexity=perp, n_iter=n_iter
+            )  # you can change these hyperparameters as needed
+            tsne_results = tsne.fit_transform(data_numpy)
+
+            # tsne_results now has a shape of [num_samples, 2], and you can plot it
+
+            # Use boolean indexing to separate points for each label
+            top_points = tsne_results[labels_numpy == 1]
+            qcd_points = tsne_results[labels_numpy == 0]
+
+            plt.figure(figsize=(10, 10))
+            ax = plt.gca()
+            # Plot each class with a different color and label
+            plt.scatter(
+                top_points[:, 0],
+                top_points[:, 1],
+                color="b",
+                alpha=0.5,
+                label="top",
+                s=1,
+            )
+            plt.scatter(
+                qcd_points[:, 0],
+                qcd_points[:, 1],
+                color="y",
+                alpha=0.5,
+                label="QCD",
+                s=1,
+            )
+            ax.set_yticklabels([])
+            ax.set_xticklabels([])
+            plt.title("t-SNE visualization of jet features")
+            plt.legend(loc="upper right")  # place the legend at the upper right corner
+            plt.savefig(f"{args.eval_path}/tsne_{label}_{perp}_{n_iter}.png", dpi=300)
+            # plt.show()
+            plt.close()
 
 
 def plot_top_and_qcd_features(data_top, data_qcd, args, label):
@@ -284,8 +297,8 @@ def plot_pca(args, net, label, dataloader):
     # split the data into top and qcd
     signal_dataloader, background_dataloader = split_data(dataloader)
     # obtain representations for top and qcd
-    reps_top = obtain_reps(net, signal_dataloader, args)
-    reps_qcd = obtain_reps(net, background_dataloader, args)
+    reps_top = obtain_reps(net, signal_dataloader, args).detach().cpu().numpy()
+    reps_qcd = obtain_reps(net, background_dataloader, args).detach().cpu().numpy()
     # do pca
     reps_top_pca = do_pca(reps_top)
     reps_qcd_pca = do_pca(reps_qcd)
@@ -307,7 +320,7 @@ def main(args):
     args.device = device
 
     dataloader = load_data(args.dataset_path)
-    model = load_model(args.load_jjepa_path)
+    model = load_model(args.load_jjepa_path, args.device)
     context_encoder = model.context_transformer
     target_encoder = model.target_transformer
     print("-------------------")

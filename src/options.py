@@ -186,7 +186,7 @@ class Options(Namespace):
         self.warmup_epochs: int = 10
 
         # Whether to use automatic mixed precision
-        self.use_amp: bool = True
+        self.use_amp: bool = False
 
         # EMA parameters [start_value, end_value]
         self.ema: list = [0.996, 0.999]
@@ -244,7 +244,7 @@ class Options(Namespace):
         self.base_momentum: float = 0.99
 
         # max grad norm
-        self.max_grad_norm: float = 1.0
+        self.max_grad_norm: float = 0.1
 
         # number of steps per epoch
         self.num_steps_per_epoch: int = self.num_jets // self.batch_size
