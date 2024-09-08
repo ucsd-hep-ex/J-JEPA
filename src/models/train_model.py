@@ -48,6 +48,9 @@ def parse_args():
     parser.add_argument(
         "--load_checkpoint", type=str, default=None, help="Start training from a saved checkpoint"
     )
+    parser.add_argument(
+        "--num_gpus", type=int, default=1, help="Number of gpus"        
+    )
     return parser.parse_args()
 
 
@@ -578,6 +581,7 @@ def main(rank, world_size, args):
 if __name__ == "__main__":
     args = parse_args()
     world_size = torch.cuda.device_count()
+    world_size = args.num_gpus 
     if world_size > 1:
         torch.multiprocessing.spawn(
             main, args=(world_size, args), nprocs=world_size, join=True
