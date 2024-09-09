@@ -16,7 +16,7 @@ micromamba activate /home/zzhao7/micromamba/envs/pytorch
 
 /home/zzhao7/micromamba/envs/pytorch/bin/pip install -e /home/zzhao7/I-JEPA-Jets
 /home/zzhao7/micromamba/envs/pytorch/bin/python -m src.evaluation.finetune 
---out-dir "model_performances/100K/lct-sum/" 
+--out-dir "model_performances/100K/lct-sum-batch/" 
 --finetune 0 
 --train-dataset-path "data/train_20_30_new.h5" 
 --val-dataset-path "data/val_20_30_new.h5" 
