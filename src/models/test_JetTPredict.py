@@ -36,10 +36,9 @@ if __name__ == "__main__":
     B = 100
     N_ctxt = 8
     N_trgt = 2
-    emb_dim = 512
     N_ftr = 4  # [pt, eta, phi, E]
 
-    x = torch.rand(B, N_ctxt, emb_dim, dtype=torch.float)
+    x = torch.rand(B, N_ctxt, options.emb_dim, dtype=torch.float)
     subjet_mask = torch.randint(0, 2, (B, N_ctxt), dtype=torch.bool)
     target_subjet_ftrs = torch.rand(B, N_trgt, N_ftr, dtype=torch.float)
     context_subjet_ftrs = torch.rand(B, N_ctxt, N_ftr, dtype=torch.float)
