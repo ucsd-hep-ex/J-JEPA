@@ -555,14 +555,15 @@ def main(rank, world_size, args):
                 )
 
         scheduler.step()
-        save_checkpoint(
-            model,
-            optimizer,
-            epoch,
-            loss_meter_train.avg,
-            loss_meter_val,
-            args.output_dir,
-        )
+        if epoch % options.checkpoint_freq == 0:
+            save_checkpoint(
+                model,
+                optimizer,
+                epoch,
+                loss_meter_train.avg,
+                loss_meter_val,
+                args.output_dir,
+            )
 
         losses_train.append(loss_meter_train.avg)
         losses_val.append(loss_meter_val.avg)
