@@ -80,18 +80,44 @@ def find_nearest(array, value):
     return array[idx]
 
 
+# def get_perf_stats(labels, measures):
+#     measures = np.nan_to_num(measures)
+#     auc = metrics.roc_auc_score(labels, measures)
+#     fpr, tpr, _ = metrics.roc_curve(labels, measures)
+#     fpr2 = [fpr[i] for i in range(len(fpr)) if tpr[i] >= 0.5]
+#     tpr2 = [tpr[i] for i in range(len(tpr)) if tpr[i] >= 0.5]
+#     try:
+#         imtafe = np.nan_to_num(
+#             1 / fpr2[list(tpr2).index(find_nearest(list(tpr2), 0.5))]
+#         )
+#     except:
+#         imtafe = 1
+#     return auc, imtafe
+
+
 def get_perf_stats(labels, measures):
-    measures = np.nan_to_num(measures)
+    measures = np.nan_to_num(measures)  # Replace NaNs with 0
     auc = metrics.roc_auc_score(labels, measures)
     fpr, tpr, _ = metrics.roc_curve(labels, measures)
+
+    # Only keep fpr/tpr where tpr >= 0.5
     fpr2 = [fpr[i] for i in range(len(fpr)) if tpr[i] >= 0.5]
     tpr2 = [tpr[i] for i in range(len(tpr)) if tpr[i] >= 0.5]
+
+    epsilon = 1e-8  # Small value to avoid division by zero or very small numbers
+
+    # Calculate IMTAFE, handle edge cases
     try:
-        imtafe = np.nan_to_num(
-            1 / fpr2[list(tpr2).index(find_nearest(list(tpr2), 0.5))]
-        )
-    except:
+        if len(tpr2) > 0 and len(fpr2) > 0:
+            nearest_tpr_idx = list(tpr2).index(find_nearest(list(tpr2), 0.5))
+            imtafe = np.nan_to_num(1 / (fpr2[nearest_tpr_idx] + epsilon))
+            if imtafe > 1e4:  # something went wrong
+                imtafe = 1
+        else:
+            imtafe = 1  # Default value if tpr2 or fpr2 are empty
+    except (ValueError, IndexError):  # Handle cases where index is not found
         imtafe = 1
+
     return auc, imtafe
 
 
