@@ -1,0 +1,27 @@
+#!/bin/bash
+#SBATCH --job-name="jjepa-lct-100K"
+#SBATCH --output="100K-sum-lct.%j.%N.out"
+#SBATCH --partition=gpu
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=16
+#SBATCH --gpus=1
+#SBATCH --mem=377300M
+#SBATCH --account=csd759
+#SBATCH --no-requeue
+#SBATCH -t 48:00:00
+
+module purge
+module load gpu/0.15.4
+micromamba activate /home/zzhao7/micromamba/envs/pytorch
+
+/home/zzhao7/micromamba/envs/pytorch/bin/pip install -e /home/zzhao7/I-JEPA-Jets
+/home/zzhao7/micromamba/envs/pytorch/bin/python -m src.evaluation.finetune 
+--out-dir "model_performances/100K/lct-sum/" 
+--finetune 0 
+--train-dataset-path "data/train_20_30_new.h5" 
+--val-dataset-path "data/val_20_30_new.h5" 
+--label "100K-no-finetune-sum" 
+--flatten 0 
+--sum 1 
+--option-file "ViT_L.json" 
+--load-jjepa-path "best_model_100K.pth" 
