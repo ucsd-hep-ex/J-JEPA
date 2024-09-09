@@ -1,7 +1,7 @@
 I-JEPA-Jets
 ==============================
 
-Using I-JEPA to do self-supervised learning for jet physics
+Using Joint Embedding Predictive Architecture (JEPA) to do self-supervised learning for jet physics
 
 Project Organization
 ------------
