@@ -224,6 +224,7 @@ def main(args):
             optimizer.step()
             batch_loss = batch_loss.detach().cpu().item()
             losses_e.append(batch_loss)
+            pbar.set_description(f"loss: {batch_loss}")
         loss_e = np.mean(np.array(losses_e))
         loss_train_all.append(loss_e)
 
@@ -259,6 +260,7 @@ def main(args):
             correct_e.append(y.cpu().data)
             loss_e_val = np.mean(np.array(losses_e_val))
             loss_val_all.append(loss_e_val)
+            pbar.set_description(f"batch val loss: {loss_e_val}")
 
         te1 = time.time()
         print(
