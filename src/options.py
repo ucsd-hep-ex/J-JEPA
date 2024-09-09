@@ -35,6 +35,10 @@ class Options(Namespace):
         # Use predictor
         self.use_predictor: bool = True
 
+        # embedding layers type
+        self.embedding_layers_type = "EmbeddingStack"
+        self.predictor_embedding_layers_type = "EmbeddingStack"
+
         # initial embeddings
         # initial embedding layer size
         self.initial_embedding_dim: int = 256
@@ -247,7 +251,7 @@ class Options(Namespace):
         self.max_grad_norm: float = 0.1
 
         # number of steps per epoch
-        self.num_steps_per_epoch: int = None 
+        self.num_steps_per_epoch: int = None
 
         # number of steps per epoch
         self.log_freq: int = 10

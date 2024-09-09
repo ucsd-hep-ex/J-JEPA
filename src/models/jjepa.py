@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from src.layers import create_embedding_layers, create_predictor_embedding_layers
 from src.layers.linear_block.activations import create_activation
 from src.layers.embedding_stack import EmbeddingStack, PredictorEmbeddingStack
 from src.util.positional_embedding import create_pos_emb_fn
@@ -150,7 +151,9 @@ class JetsTransformer(nn.Module):
         self.calc_pos_emb = create_pos_emb_fn(options.emb_dim)
 
         # Adjust the input dimensions based on the new input shape
-        self.subjet_emb = EmbeddingStack(
+        print("num_particles", options.num_particles)
+        print("num_part_ftr", options.num_part_ftr)
+        self.subjet_emb = create_embedding_layers(
             options, options.num_particles * options.num_part_ftr
         )
 
@@ -227,7 +230,7 @@ class JetsTransformerPredictor(nn.Module):
             print("Initializing JetsTransformerPredictor module")
         norm_layer = NORM_LAYERS.get(options.normalization, nn.LayerNorm)
         self.init_std = options.init_std
-        self.predictor_embed = PredictorEmbeddingStack(
+        self.predictor_embed = create_predictor_embedding_layers(
             options, input_dim=options.emb_dim
         )
         self.calc_predictor_pos_emb = create_pos_emb_fn(options.predictor_emb_dim)
@@ -356,6 +359,7 @@ class JJEPA(nn.Module):
     def forward(self, context, target, full_jet):
         if self.options.debug:
             print(f"JJEPA forward pass")
+        print(full_jet['particles'].size())
         context_repr = self.context_transformer(
             full_jet,
             full_jet["subjet_mask"],
