@@ -1,0 +1,28 @@
+#!/bin/bash
+#SBATCH --job-name="n-jjepa-finetune-100K-flatten"
+#SBATCH --output="n-100K-flatten-finetune.%j.%N.out"
+#SBATCH --partition=gpu
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=16
+#SBATCH --gpus=1
+#SBATCH --mem=377300M
+#SBATCH --account=csd759
+#SBATCH --no-requeue
+#SBATCH -t 48:00:00
+
+module purge
+module load gpu/0.15.4
+eval "$(micromamba shell hook --shell )"
+micromamba activate /home/zzhao7/micromamba/envs/pytorch
+cd /home/zzhao7/I-JEPA-Jets
+/home/zzhao7/micromamba/envs/pytorch/bin/pip install -e /home/zzhao7/I-JEPA-Jets
+/home/zzhao7/micromamba/envs/pytorch/bin/python -m src.evaluation.finetune \
+--out-dir "model_performances/100K/finetune-flatten-batch2/" \
+--finetune 1 \
+--train-dataset-path "data/train_20_30_new.h5" \
+--val-dataset-path "data/val_20_30_new.h5" \
+--label "100K-no-finetune-flatten" \
+--flatten 1 \
+--sum 0 \
+--option-file "ViT_L.json" \
+--load-jjepa-path "best_model_100K.pth" 
