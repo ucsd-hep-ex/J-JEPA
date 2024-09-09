@@ -144,6 +144,19 @@ def main(args):
     args.logfile = out_dir + "logfile.txt"
     logfile = open(args.logfile, "a")
     print("logfile initialised", file=logfile, flush=True)
+    if args.flatten:
+        print("aggregation method: flatten", file=logfile, flush=True)
+    elif args.sum:
+        print("aggregation method: sum", file=logfile, flush=True)
+    else:
+        raise ValueError("No aggregation method specified")
+    if args.finetune:
+        print("finetuning (jjepa weights not frozen)", file=logfile, flush=True)
+    else:
+        print("lct (jjepa weights frozen)", file=logfile, flush=True)
+
+
+
 
     # define the global base device
     world_size = torch.cuda.device_count()
