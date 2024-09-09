@@ -204,6 +204,7 @@ def main(args):
 
             y = labels.to(args.device)
             x = x.view(x.shape[0], x.shape[1], -1)
+            x = x.to(args.device)
             batch = {"particles": x.to(torch.float32)}
             reps = net(
                 batch,
@@ -237,6 +238,7 @@ def main(args):
             for i, (x, _, subjets, _, subjet_mask, _, labels) in enumerate(pbar):
                 y = labels.to(args.device)
             x = x.view(x.shape[0], x.shape[1], -1)
+            x = x.to(args.device)
             batch = {"particles": x.to(torch.float32)}
             reps = net(
                 batch,
