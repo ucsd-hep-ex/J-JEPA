@@ -54,12 +54,7 @@ def Projector(mlp, embedding):
 # load data
 def load_data(dataset_path, tag=None):
     # data_dir = f"{dataset_path}/{flag}/processed/4_features"
-    if tag == "train":
-        num_jets = 100 * 1000
-    elif tag == "val":
-        num_jets = 10 * 1000
-    else:
-        raise ValueError("tag must be either train or val")
+    num_jets =  100 * 1000
     datset = JetDataset(dataset_path, labels=True, num_jets=num_jets)
     dataloader = DataLoader(datset, batch_size=args.batch_size, shuffle=True)
     return dataloader
@@ -277,29 +272,30 @@ def main(args):
             pbar = tqdm(val_dataloader)
             for i, (x, _, subjets, _, subjet_mask, _, labels) in enumerate(pbar):
                 y = labels.to(args.device)
-            x = x.view(x.shape[0], x.shape[1], -1)
-            x = x.to(args.device)
-            batch = {"particles": x.to(torch.float32)}
-            reps = net(
-                batch,
-                subjet_mask.to(args.device),
-                subjets_meta=subjets.to(args.device),
-                split_mask=None,
-            )
-            if args.flatten:
-                reps = reps.view(reps.shape[0], -1)
-            elif args.sum:
-                reps = reps.sum(dim=1)
-            else:
-                raise ValueError("No aggregation method specified")
-            out = proj(reps)
-            batch_loss = loss(out, y.long()).detach().cpu().item()
-            losses_e_val.append(batch_loss)
-            predicted_e.append(softmax(out).cpu().data.numpy())
-            correct_e.append(y.cpu().data)
+                x = x.view(x.shape[0], x.shape[1], -1)
+                x = x.to(args.device)
+                batch = {"particles": x.to(torch.float32)}
+                reps = net(
+                    batch,
+                    subjet_mask.to(args.device),
+                    subjets_meta=subjets.to(args.device),
+                    split_mask=None,
+                )
+                if args.flatten:
+                    reps = reps.view(reps.shape[0], -1)
+                elif args.sum:
+                    reps = reps.sum(dim=1)
+                else:
+                    raise ValueError("No aggregation method specified")
+                out = proj(reps)
+                batch_loss = loss(out, y.long()).detach().cpu().item()
+                losses_e_val.append(batch_loss)
+                predicted_e.append(softmax(out).cpu().data.numpy())
+                correct_e.append(y.cpu().data)
+                pbar.set_description(f"batch val loss: {loss_e_val}")
             loss_e_val = np.mean(np.array(losses_e_val))
             loss_val_all.append(loss_e_val)
-            pbar.set_description(f"batch val loss: {loss_e_val}")
+            
 
         te1 = time.time()
         print(
@@ -376,13 +372,14 @@ def main(args):
         # calculate the AUC and imtafe and output to the logfile
         auc, imtafe = get_perf_stats(target, predicted[:, 1])
 
-        if imtafe > rej_val_best:
-            print("new highest val rejection", flush=True, file=logfile)
-            print(
+        print(
                 f"epoch: {epoch}, AUC: {auc}, IMTAFE: {imtafe}",
                 flush=True,
                 file=logfile,
             )
+        if imtafe > rej_val_best:
+            print("new highest val rejection", flush=True, file=logfile)
+            
             rej_val_best = imtafe
             if args.finetune:
                 torch.save(
