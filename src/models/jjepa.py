@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from src.layers import create_embedding_layers, create_predictor_embedding_layers
 from src.layers.linear_block.activations import create_activation
 from src.layers.embedding_stack import EmbeddingStack, PredictorEmbeddingStack
-from src.util.positional_embedding import create_pos_emb_fn
+from src.util import create_pos_emb_fn
 from src.options import Options
 from src.util.tensors import trunc_normal_
 from src.util.DimensionCheckLayer import DimensionCheckLayer
@@ -148,7 +148,7 @@ class JetsTransformer(nn.Module):
         norm_layer = NORM_LAYERS.get(options.normalization, nn.LayerNorm)
         self.num_part_ftr = options.num_part_ftr
         self.embed_dim = options.emb_dim
-        self.calc_pos_emb = create_pos_emb_fn(options.emb_dim)
+        self.calc_pos_emb = create_pos_emb_fn(options, options.emb_dim)
 
         # Adjust the input dimensions based on the new input shape
         print("num_particles", options.num_particles)
@@ -233,7 +233,7 @@ class JetsTransformerPredictor(nn.Module):
         self.predictor_embed = create_predictor_embedding_layers(
             options, input_dim=options.emb_dim
         )
-        self.calc_predictor_pos_emb = create_pos_emb_fn(options.predictor_emb_dim)
+        self.calc_predictor_pos_emb = create_pos_emb_fn(options, options.predictor_emb_dim)
 
         options.repr_dim = options.predictor_emb_dim
         options.attn_dim = options.repr_dim

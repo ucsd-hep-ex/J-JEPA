@@ -22,7 +22,7 @@ def get_1d_sincos_pos_emb(embed_dim, pos):
     return emb
 
 
-def create_pos_emb_fn(emb_dim):
+def create_space_pos_emb_fn(emb_dim):
     """
     Input:
         emb_dim: Integer
@@ -52,6 +52,45 @@ def create_pos_emb_fn(emb_dim):
 
         # print(emb_phi_star.shape)
         emb = torch.cat([emb_eta, emb_phi_star], axis=2)
+
+        return emb
+
+    return calc_pos_emb
+
+def create_phase_space_pos_emb_fn(emb_dim):
+    """
+    Input:
+        emb_dim: Integer
+    Return:
+        a function that calculate the positional embeding by
+        subjet eta and phi
+    """
+
+    def calc_pos_emb(subjet_ftrs):
+        """
+        Input:
+            subjets_ftrs: torch tensor of shape (bs, N_subjets, N_sj_ftrs)
+                last dimension: [pt, eta, phi, E]
+        """
+        sj_pt = subjet_ftrs[:, :, 0]
+        sj_eta = subjet_ftrs[:, :, 1]
+        sj_phi = subjet_ftrs[:, :, 2]
+        sj_E = subjet_ftrs[:, :, 3]
+
+        # process phi to impose physical distance
+        sj_phi_star = torch.sin(sj_phi / 2)
+
+        # shift eta to avoid negative positions
+        sj_eta += 3
+
+        # calculate embedding
+        emb_pt = get_1d_sincos_pos_emb(emb_dim // 4, sj_pt)
+        emb_eta = get_1d_sincos_pos_emb(emb_dim // 4, sj_eta)
+        emb_phi_star = get_1d_sincos_pos_emb(emb_dim // 4, sj_phi_star)
+        emb_E = get_1d_sincos_pos_emb(emb_dim // 4, sj_E)
+
+        # print(emb_phi_star.shape)
+        emb = torch.cat([emb_pt, emb_eta, emb_phi_star, emb_E], axis=2)
 
         return emb
 

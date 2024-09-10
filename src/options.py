@@ -39,6 +39,9 @@ class Options(Namespace):
         self.embedding_layers_type = "EmbeddingStack"
         self.predictor_embedding_layers_type = "EmbeddingStack"
 
+        # pos embedding type
+        self.pos_emb_type = "space"
+
         # initial embeddings
         # initial embedding layer size
         self.initial_embedding_dim: int = 256
