@@ -12,7 +12,6 @@ if __name__ == "__main__":
     print("Testing JetTransformerPredictor")
 
     options = Options()
-    options.load("src/test_options.json")
     options.display()
 
     jetT = JetsTransformerPredictor(options)
