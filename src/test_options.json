@@ -1,7 +1,0 @@
-{
-    "emb_dim": 1024,
-    "activation": "relu",
-    "skip_connections": true,
-    "num_epochs": 5,
-	"num_particles":128
-}

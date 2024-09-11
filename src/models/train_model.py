@@ -48,6 +48,9 @@ def parse_args():
     parser.add_argument(
         "--load_checkpoint", type=str, default=None, help="Start training from a saved checkpoint"
     )
+    parser.add_argument(
+        "--num_gpus", type=int, default=1, help="Number of gpus"        
+    )
     return parser.parse_args()
 
 
@@ -208,6 +211,8 @@ def main(rank, world_size, args):
     device = torch.device(f"cuda:{rank}" if torch.cuda.is_available() else "cpu")
 
     options = Options.load(args.config)
+    options.num_steps_per_epoch = options.num_jets // options.batch_size
+
     setup_logging(rank, args.output_dir)
     logger.info(f"Initialized (rank/world-size) {rank}/{world_size}")
 
@@ -409,9 +414,9 @@ def main(rank, world_size, args):
                         scaler.update()
                     else:
                         loss.backward()
-                        torch.nn.utils.clip_grad_norm_(
-                            model.parameters(), options.max_grad_norm
-                        )
+                        # torch.nn.utils.clip_grad_norm_(
+                        #     model.parameters(), options.max_grad_norm
+                        # )
                         optimizer.step()
 
                     # Step 3. momentum update of target encoder
@@ -469,8 +474,7 @@ def main(rank, world_size, args):
             )
 
             def val_step():
-                test_option_path = "/mnt/d/physic/I-JEPA-Jets-Subash/src/test_options.json"
-                options = Options.load(test_option_path)
+                options = Options.load(args.config)
 
                 optimizer.zero_grad()
 
@@ -551,14 +555,15 @@ def main(rank, world_size, args):
                 )
 
         scheduler.step()
-        save_checkpoint(
-            model,
-            optimizer,
-            epoch,
-            loss_meter_train.avg,
-            loss_meter_val,
-            args.output_dir,
-        )
+        if epoch % options.checkpoint_freq == 0:
+            save_checkpoint(
+                model,
+                optimizer,
+                epoch,
+                loss_meter_train.avg,
+                loss_meter_val,
+                args.output_dir,
+            )
 
         losses_train.append(loss_meter_train.avg)
         losses_val.append(loss_meter_val.avg)
@@ -577,6 +582,7 @@ def main(rank, world_size, args):
 if __name__ == "__main__":
     args = parse_args()
     world_size = torch.cuda.device_count()
+    world_size = args.num_gpus 
     if world_size > 1:
         torch.multiprocessing.spawn(
             main, args=(world_size, args), nprocs=world_size, join=True

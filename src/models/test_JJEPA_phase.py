@@ -12,6 +12,15 @@ if __name__ == "__main__":
     print("Testing full JJEPA model")
 
     options = Options()
+    # options.embedding_layers_type = "LinearEmbeddingStack"
+    # options.predictor_embedding_layers_type = 'LinearEmbeddingStack'
+
+    options.initial_embedding_dim = 120
+    options.emb_dim = 120
+    options.predictor_emb_dim = 64
+
+    options.pos_emb_type = 'phasespace'
+
     options.display()
 
     jjepa = JJEPA(options)

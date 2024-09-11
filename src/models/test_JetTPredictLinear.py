@@ -12,6 +12,10 @@ if __name__ == "__main__":
     print("Testing JetTransformerPredictor")
 
     options = Options()
+    options.predictor_embedding_layers_type = 'LinearEmbeddingStack'
+    options.initial_embedding_dim = 128
+    options.emb_dim = 128
+    options.predictor_emb_dim = 64
     options.display()
 
     jetT = JetsTransformerPredictor(options)

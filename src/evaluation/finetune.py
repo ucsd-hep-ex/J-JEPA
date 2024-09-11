@@ -52,15 +52,21 @@ def Projector(mlp, embedding):
 
 
 # load data
-def load_data(dataset_path):
+def load_data(dataset_path, tag=None):
     # data_dir = f"{dataset_path}/{flag}/processed/4_features"
-    datset = JetDataset(dataset_path, labels=True)
+    if tag == "train":
+        num_jets = 100 * 1000
+    elif tag == "val":
+        num_jets = 10 * 1000
+    else:
+        raise ValueError("tag must be either train or val")
+    datset = JetDataset(dataset_path, labels=True, num_jets=num_jets)
     dataloader = DataLoader(datset, batch_size=args.batch_size, shuffle=True)
     return dataloader
 
 
 def load_model(model_path=None, device="cpu"):
-    options = Options(args.option_file)
+    options = Options.load(args.option_file)
     model = JJEPA(options).to(device)
     if model_path:
         model.load_state_dict(torch.load(model_path, map_location=device))
@@ -74,18 +80,44 @@ def find_nearest(array, value):
     return array[idx]
 
 
+# def get_perf_stats(labels, measures):
+#     measures = np.nan_to_num(measures)
+#     auc = metrics.roc_auc_score(labels, measures)
+#     fpr, tpr, _ = metrics.roc_curve(labels, measures)
+#     fpr2 = [fpr[i] for i in range(len(fpr)) if tpr[i] >= 0.5]
+#     tpr2 = [tpr[i] for i in range(len(tpr)) if tpr[i] >= 0.5]
+#     try:
+#         imtafe = np.nan_to_num(
+#             1 / fpr2[list(tpr2).index(find_nearest(list(tpr2), 0.5))]
+#         )
+#     except:
+#         imtafe = 1
+#     return auc, imtafe
+
+
 def get_perf_stats(labels, measures):
-    measures = np.nan_to_num(measures)
+    measures = np.nan_to_num(measures)  # Replace NaNs with 0
     auc = metrics.roc_auc_score(labels, measures)
     fpr, tpr, _ = metrics.roc_curve(labels, measures)
+
+    # Only keep fpr/tpr where tpr >= 0.5
     fpr2 = [fpr[i] for i in range(len(fpr)) if tpr[i] >= 0.5]
     tpr2 = [tpr[i] for i in range(len(tpr)) if tpr[i] >= 0.5]
+
+    epsilon = 1e-8  # Small value to avoid division by zero or very small numbers
+
+    # Calculate IMTAFE, handle edge cases
     try:
-        imtafe = np.nan_to_num(
-            1 / fpr2[list(tpr2).index(find_nearest(list(tpr2), 0.5))]
-        )
-    except:
+        if len(tpr2) > 0 and len(fpr2) > 0:
+            nearest_tpr_idx = list(tpr2).index(find_nearest(list(tpr2), 0.5))
+            imtafe = np.nan_to_num(1 / (fpr2[nearest_tpr_idx] + epsilon))
+            if imtafe > 1e4:  # something went wrong
+                imtafe = 1
+        else:
+            imtafe = 1  # Default value if tpr2 or fpr2 are empty
+    except (ValueError, IndexError):  # Handle cases where index is not found
         imtafe = 1
+
     return auc, imtafe
 
 
@@ -133,8 +165,8 @@ def main(args):
     print(f"finetune: {args.finetune}", file=logfile, flush=True)
 
     print("loading data")
-    train_dataloader = load_data(args.train_dataset_path)
-    val_dataloader = load_data(args.val_dataset_path)
+    train_dataloader = load_data(args.train_dataset_path, "train")
+    val_dataloader = load_data(args.val_dataset_path, "val")
 
     t1 = time.time()
 
@@ -198,6 +230,7 @@ def main(args):
 
             y = labels.to(args.device)
             x = x.view(x.shape[0], x.shape[1], -1)
+            x = x.to(args.device)
             batch = {"particles": x.to(torch.float32)}
             reps = net(
                 batch,
@@ -217,6 +250,7 @@ def main(args):
             optimizer.step()
             batch_loss = batch_loss.detach().cpu().item()
             losses_e.append(batch_loss)
+            pbar.set_description(f"loss: {batch_loss}")
         loss_e = np.mean(np.array(losses_e))
         loss_train_all.append(loss_e)
 
@@ -227,10 +261,11 @@ def main(args):
         # validation
         with torch.no_grad():
             proj.eval()
-            pbar = tqdm(train_dataloader)
+            pbar = tqdm(val_dataloader)
             for i, (x, _, subjets, _, subjet_mask, _, labels) in enumerate(pbar):
                 y = labels.to(args.device)
             x = x.view(x.shape[0], x.shape[1], -1)
+            x = x.to(args.device)
             batch = {"particles": x.to(torch.float32)}
             reps = net(
                 batch,
@@ -251,6 +286,7 @@ def main(args):
             correct_e.append(y.cpu().data)
             loss_e_val = np.mean(np.array(losses_e_val))
             loss_val_all.append(loss_e_val)
+            pbar.set_description(f"batch val loss: {loss_e_val}")
 
         te1 = time.time()
         print(

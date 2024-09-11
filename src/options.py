@@ -35,6 +35,13 @@ class Options(Namespace):
         # Use predictor
         self.use_predictor: bool = True
 
+        # embedding layers type
+        self.embedding_layers_type = "EmbeddingStack"
+        self.predictor_embedding_layers_type = "EmbeddingStack"
+
+        # pos embedding type
+        self.pos_emb_type = "space"
+
         # initial embeddings
         # initial embedding layer size
         self.initial_embedding_dim: int = 256
@@ -171,7 +178,7 @@ class Options(Namespace):
         self.eps: float = 1e-7
 
         # Optimizer learning rate.
-        self.learning_rate: float = 0.001
+        self.learning_rate: float = 0.0001
 
         # Weight decay for optimizer
         self.weight_decay: float = 0.01
@@ -186,7 +193,7 @@ class Options(Namespace):
         self.warmup_epochs: int = 10
 
         # Whether to use automatic mixed precision
-        self.use_amp: bool = True
+        self.use_amp: bool = False
 
         # EMA parameters [start_value, end_value]
         self.ema: list = [0.996, 0.999]
@@ -212,7 +219,7 @@ class Options(Namespace):
         # =========================================================================================
 
         # Number of jets to use in training
-        self.num_jets: int = 100000
+        self.num_jets: int = None
 
         # Number of worker processes for data loading
         self.num_workers: int = 0
@@ -244,10 +251,10 @@ class Options(Namespace):
         self.base_momentum: float = 0.99
 
         # max grad norm
-        self.max_grad_norm: float = 1.0
+        self.max_grad_norm: float = 0.1
 
         # number of steps per epoch
-        self.num_steps_per_epoch: int = self.num_jets // self.batch_size
+        self.num_steps_per_epoch: int = None
 
         # number of steps per epoch
         self.log_freq: int = 10
@@ -256,7 +263,7 @@ class Options(Namespace):
         self.debug: bool = False
 
         # number of val jets
-        self.num_val_jets: int = 10000
+        self.num_val_jets: int = None
 
 
     def display(self):
