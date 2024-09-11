@@ -292,7 +292,7 @@ def main(args):
                 losses_e_val.append(batch_loss)
                 predicted_e.append(softmax(out).cpu().data.numpy())
                 correct_e.append(y.cpu().data)
-                pbar.set_description(f"batch val loss: {loss_e_val}")
+                pbar.set_description(f"batch val loss: {batch_loss}")
             loss_e_val = np.mean(np.array(losses_e_val))
             loss_val_all.append(loss_e_val)
             

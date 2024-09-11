@@ -199,13 +199,13 @@ def main(args):
     logger = logging.getLogger(__name__)
     logger.info("making final data set from raw data")
     label = args.label
-    hdf5_file = f"/ssl-jet-vol-v3/toptagging/{label}/raw/{label}.h5"
+    hdf5_file = f"/home/zzhao7/data/{label}.h5"
     vector.register_awkward()
 
     print("reading h5 file")
     df = pd.read_hdf(hdf5_file, key="table")
-    # num_jets = len(df)
-    num_jets = 100000
+    num_jets = len(df)
+    # num_jets = 100000
     print("finished reading h5 file")
 
     print("-------------------------------")
@@ -294,7 +294,7 @@ def main(args):
     part_features["subjet_indices"] = np.zeros((num_jets, 128))
     print(part_features["part_deta"].shape)
 
-    save_path = f"/ssl-jet-vol-v3/I-JEPA-Jets/data/{label}"
+    save_path = f"/home/zzhao7/I-JEPA-Jets/data/full/{label}"
     os.system(f"mkdir -p {save_path}")  # -p: create parent dirs if needed, exist_ok
 
     # Initialize an empty list to store serialized subjets information
