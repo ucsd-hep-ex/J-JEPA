@@ -48,9 +48,8 @@ def parse_args():
     parser.add_argument(
         "--num_jets", type=int, default=1200 * 1000, help="Number of jets to train on"
     )
-    parser.add_argument(
-        "--batch_size", type=int, default=256, help="batch size"
-    )
+    parser.add_argument("--batch_size", type=int, default=256, help="batch size")
+    parser.add_argument("--lr", type=float, default=None, help="learning rate")
     return parser.parse_args()
 
 
@@ -212,16 +211,16 @@ def main(rank, world_size, args):
     if os.path.isdir(out_dir):
         # List all items in the directory
         contents = os.listdir(out_dir)
-        
+
         # Filter out log files (assuming log files end with '.log')
-        non_log_files = [file for file in contents if file.endswith('.pth')]
-        
+        non_log_files = [file for file in contents if file.endswith(".pth")]
+
         # Check if there are files other than log files
         if non_log_files:
             sys.exit(
                 "ERROR: experiment already exists and contains files other than log files; don't want to overwrite it by mistake"
             )
-    
+
     # This will create the directory if it does not exist or if it is empty
     os.makedirs(out_dir, exist_ok=True)
     if world_size > 1:
@@ -288,6 +287,8 @@ def main(rank, world_size, args):
     ]
 
     logger.info("Using AdamW")
+    if args.lr:
+        options.lr = args.lr
     optimizer = optim.AdamW(
         param_groups,
         lr=options.lr,
@@ -310,6 +311,7 @@ def main(rank, world_size, args):
 
     for epoch in range(options.start_epochs, options.num_epochs):
         logger.info("Epoch %d" % (epoch + 1))
+        logger.info("lr: %f" % scheduler.get_last_lr())
 
         if train_sampler:
             train_sampler.set_epoch(epoch)
