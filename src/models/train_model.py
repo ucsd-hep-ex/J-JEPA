@@ -12,7 +12,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from torch.nn.parallel import DistributedDataParallel
-from torch.amp import GradScaler, autocast
+from torch.cuda.amp import GradScaler, autocast
 import torch.distributed as dist
 import time
 from tqdm import tqdm
@@ -24,11 +24,6 @@ from src.options import Options
 from src.models.jjepa import JJEPA
 from src.dataset.JEPADataset import JEPADataset
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
-
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train JJEPA model")
@@ -36,9 +31,7 @@ def parse_args():
         "--config",
         type=str,
         required=True,
-
         default="/mnt/d/physic/I-JEPA-Jets-Subash/src/test_options.json",
-
         help="Path to config JSON file",
     )
     parser.add_argument("--data_path", type=str, required=True, help="Path to dataset")
@@ -46,10 +39,17 @@ def parse_args():
         "--output_dir", type=str, default="output", help="Output directory"
     )
     parser.add_argument(
-        "--load_checkpoint", type=str, default=None, help="Start training from a saved checkpoint"
+        "--load_checkpoint",
+        type=str,
+        default=None,
+        help="Start training from a saved checkpoint",
+    )
+    parser.add_argument("--num_gpus", type=int, default=1, help="Number of gpus")
+    parser.add_argument(
+        "--num_jets", type=int, default=1200 * 1000, help="Number of jets to train on"
     )
     parser.add_argument(
-        "--num_gpus", type=int, default=1, help="Number of gpus"        
+        "--batch_size", type=int, default=256, help="batch size"
     )
     return parser.parse_args()
 
@@ -63,13 +63,11 @@ def setup_environment(rank):
 
 
 def setup_data_loader(options, data_path, world_size, rank, tag="train"):
-    # TODO: verify path to dataset on the volume once NRP is functional
-    # dataset = JEPADataset(f"{data_path}/{tag}/...", num_jets=options.num_jets)
     if tag == "val":
         data_path = data_path.replace("train", "val")
-        dataset = JEPADataset(data_path, num_jets=options.num_val_jets)
+        dataset = JEPADataset(data_path, num_jets=args.num_val_jets)
     else:
-        dataset = JEPADataset(data_path, num_jets=options.num_jets)
+        dataset = JEPADataset(data_path, num_jets=args.num_jets)
 
     sampler = torch.utils.data.distributed.DistributedSampler(
         dataset, num_replicas=world_size, rank=rank, shuffle=True
@@ -122,6 +120,9 @@ def save_checkpoint(model, optimizer, epoch, loss_train, loss_val, output_dir):
         checkpoint, os.path.join(output_dir, f"checkpoint_epoch_{epoch + 1}.pth")
     )
 
+
+# Create a logger
+logger = logging.getLogger(__name__)
 
 
 def setup_logging(rank, output_dir):
@@ -196,7 +197,9 @@ def gpu_timer(closure):
 
 def log_gpu_stats(device):
     if torch.cuda.is_available():
-        memory_allocated = torch.cuda.memory_allocated(device) / 1024**3  # Converted to GB
+        memory_allocated = (
+            torch.cuda.memory_allocated(device) / 1024**3
+        )  # Converted to GB
         memory_reserved = torch.cuda.memory_reserved(device) / 1024**3
         utilization = cuda.utilization(device)
         logger.info(f"GPU Memory Allocated: {memory_allocated:.2f} GB")
@@ -204,13 +207,30 @@ def log_gpu_stats(device):
         logger.info(f"GPU Utilization: {utilization}%")
 
 
-
 def main(rank, world_size, args):
+    out_dir = args.output_dir
+    if os.path.isdir(out_dir):
+        # List all items in the directory
+        contents = os.listdir(out_dir)
+        
+        # Filter out log files (assuming log files end with '.log')
+        non_log_files = [file for file in contents if file.endswith('.pth')]
+        
+        # Check if there are files other than log files
+        if non_log_files:
+            sys.exit(
+                "ERROR: experiment already exists and contains files other than log files; don't want to overwrite it by mistake"
+            )
+    
+    # This will create the directory if it does not exist or if it is empty
+    os.makedirs(out_dir, exist_ok=True)
     if world_size > 1:
         setup_environment(rank)
     device = torch.device(f"cuda:{rank}" if torch.cuda.is_available() else "cpu")
+    args.num_val_jets = args.num_jets // 4
 
     options = Options.load(args.config)
+    options.batch_size = args.batch_size
     options.num_steps_per_epoch = options.num_jets // options.batch_size
 
     setup_logging(rank, args.output_dir)
@@ -229,6 +249,8 @@ def main(rank, world_size, args):
     val_loader, val_sampler, val_dataset_size = setup_data_loader(
         options, args.data_path, world_size, rank, tag="val"
     )
+    logger.info(f"Train dataset size: {train_dataset_size}")
+    logger.info(f"Val dataset size: {val_dataset_size}")
 
     param_groups = [
         {
@@ -286,7 +308,6 @@ def main(rank, world_size, args):
     losses_val = []
     lowest_val_loss = np.inf
 
-
     for epoch in range(options.start_epochs, options.num_epochs):
         logger.info("Epoch %d" % (epoch + 1))
 
@@ -322,11 +343,17 @@ def main(rank, world_size, args):
                 options.num_particles * options.num_part_ftr,
             )
 
-            particle_features = particle_features.to(device, non_blocking=True, dtype=torch.float32)
+            particle_features = particle_features.to(
+                device, non_blocking=True, dtype=torch.float32
+            )
             subjets = subjets.to(device, non_blocking=True, dtype=torch.float32)
-            particle_indices = particle_indices.to(device, non_blocking=True, dtype=torch.float32)
+            particle_indices = particle_indices.to(
+                device, non_blocking=True, dtype=torch.float32
+            )
             subjet_mask = subjet_mask.to(device, non_blocking=True, dtype=torch.float32)
-            particle_mask = particle_mask.to(device, non_blocking=True, dtype=torch.float32)
+            particle_mask = particle_mask.to(
+                device, non_blocking=True, dtype=torch.float32
+            )
 
             context_masks, target_masks = create_random_masks(
                 x.shape[0], options.num_subjets, device
@@ -379,9 +406,8 @@ def main(rank, world_size, args):
                     subjets.shape[0], num_trg_subj_mask_selected
                 )
 
-                with autocast(device_type="cuda", enabled=options.use_amp):
+                with autocast(enabled=options.use_amp):
                     context = {
-
                         "subjets": selected_sub_j_context.to(device),
                         "particle_mask": particle_mask.to(device),
                         "subjet_mask": context_subjets_mask.to(device),
@@ -398,7 +424,6 @@ def main(rank, world_size, args):
                         "particle_mask": particle_mask.to(device),
                         "subjet_mask": subjet_mask.to(device),
                         "subjets": subjets.to(device),
-
                     }
 
                     pred_repr, target_repr = model(context, target, full_jet)
@@ -463,19 +488,23 @@ def main(rank, world_size, args):
                 options.num_particles * options.num_part_ftr,
             )
 
-            particle_features = particle_features.to(device, non_blocking=True, dtype=torch.float32)
+            particle_features = particle_features.to(
+                device, non_blocking=True, dtype=torch.float32
+            )
             subjets = subjets.to(device, non_blocking=True, dtype=torch.float32)
-            particle_indices = particle_indices.to(device, non_blocking=True, dtype=torch.float32)
+            particle_indices = particle_indices.to(
+                device, non_blocking=True, dtype=torch.float32
+            )
             subjet_mask = subjet_mask.to(device, non_blocking=True, dtype=torch.float32)
-            particle_mask = particle_mask.to(device, non_blocking=True, dtype=torch.float32)
+            particle_mask = particle_mask.to(
+                device, non_blocking=True, dtype=torch.float32
+            )
 
             context_masks, target_masks = create_random_masks(
                 x.shape[0], options.num_subjets, device
             )
 
             def val_step():
-                options = Options.load(args.config)
-
                 optimizer.zero_grad()
 
                 # print(" subjet", subjets.shape)
@@ -517,11 +546,9 @@ def main(rank, world_size, args):
                     subjets.shape[0], num_trg_subj_mask_selected
                 )
 
-
                 with torch.no_grad():
                     model.eval()
                     context = {
-
                         "subjets": selected_sub_j_context.to(device),
                         "particle_mask": particle_mask.to(device),
                         "subjet_mask": context_subjets_mask.to(device),
@@ -581,8 +608,7 @@ def main(rank, world_size, args):
 
 if __name__ == "__main__":
     args = parse_args()
-    world_size = torch.cuda.device_count()
-    world_size = args.num_gpus 
+    world_size = min(args.num_gpus, torch.cuda.device_count())
     if world_size > 1:
         torch.multiprocessing.spawn(
             main, args=(world_size, args), nprocs=world_size, join=True

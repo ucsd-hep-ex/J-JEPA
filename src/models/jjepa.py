@@ -359,7 +359,6 @@ class JJEPA(nn.Module):
     def forward(self, context, target, full_jet):
         if self.options.debug:
             print(f"JJEPA forward pass")
-        print(full_jet['particles'].size())
         context_repr = self.context_transformer(
             full_jet,
             full_jet["subjet_mask"],

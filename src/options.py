@@ -257,14 +257,13 @@ class Options(Namespace):
         self.num_steps_per_epoch: int = None
 
         # number of steps per epoch
-        self.log_freq: int = 10
+        self.log_freq: int = 1000
 
         # debug mode
         self.debug: bool = False
 
         # number of val jets
         self.num_val_jets: int = None
-
 
     def display(self):
         try:
