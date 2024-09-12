@@ -12,7 +12,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from torch.nn.parallel import DistributedDataParallel
-from torch.amp import GradScaler, autocast
+from torch.cuda.amp import GradScaler, autocast
 import torch.distributed as dist
 import time
 from tqdm import tqdm
@@ -47,6 +47,9 @@ def parse_args():
     parser.add_argument("--num_gpus", type=int, default=1, help="Number of gpus")
     parser.add_argument(
         "--num_jets", type=int, default=1200 * 1000, help="Number of jets to train on"
+    )
+    parser.add_argument(
+        "--batch_size", type=int, default=256, help="batch size"
     )
     return parser.parse_args()
 
@@ -117,11 +120,6 @@ def save_checkpoint(model, optimizer, epoch, loss_train, loss_val, output_dir):
         checkpoint, os.path.join(output_dir, f"checkpoint_epoch_{epoch + 1}.pth")
     )
 
-
-# Setup the basic configuration for logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
 
 # Create a logger
 logger = logging.getLogger(__name__)
@@ -210,12 +208,29 @@ def log_gpu_stats(device):
 
 
 def main(rank, world_size, args):
+    out_dir = args.output_dir
+    if os.path.isdir(out_dir):
+        # List all items in the directory
+        contents = os.listdir(out_dir)
+        
+        # Filter out log files (assuming log files end with '.log')
+        non_log_files = [file for file in contents if file.endswith('.pth')]
+        
+        # Check if there are files other than log files
+        if non_log_files:
+            sys.exit(
+                "ERROR: experiment already exists and contains files other than log files; don't want to overwrite it by mistake"
+            )
+    
+    # This will create the directory if it does not exist or if it is empty
+    os.makedirs(out_dir, exist_ok=True)
     if world_size > 1:
         setup_environment(rank)
     device = torch.device(f"cuda:{rank}" if torch.cuda.is_available() else "cpu")
     args.num_val_jets = args.num_jets // 4
 
     options = Options.load(args.config)
+    options.batch_size = args.batch_size
     options.num_steps_per_epoch = options.num_jets // options.batch_size
 
     setup_logging(rank, args.output_dir)
@@ -391,7 +406,7 @@ def main(rank, world_size, args):
                     subjets.shape[0], num_trg_subj_mask_selected
                 )
 
-                with autocast(device_type="cuda", enabled=options.use_amp):
+                with autocast(enabled=options.use_amp):
                     context = {
                         "subjets": selected_sub_j_context.to(device),
                         "particle_mask": particle_mask.to(device),
