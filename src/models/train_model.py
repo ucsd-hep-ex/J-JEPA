@@ -311,7 +311,7 @@ def main(rank, world_size, args):
 
     for epoch in range(options.start_epochs, options.num_epochs):
         logger.info("Epoch %d" % (epoch + 1))
-        logger.info("lr: %f" % scheduler.get_last_lr())
+        logger.info("lr: %f" % scheduler.get_last_lr()[0])
 
         if train_sampler:
             train_sampler.set_epoch(epoch)
