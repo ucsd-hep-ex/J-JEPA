@@ -54,7 +54,7 @@ def Projector(mlp, embedding):
 # load data
 def load_data(dataset_path, tag=None):
     # data_dir = f"{dataset_path}/{flag}/processed/4_features"
-    num_jets =  100 * 1000
+    num_jets = 100 * 1000
     datset = JetDataset(dataset_path, labels=True, num_jets=num_jets)
     dataloader = DataLoader(datset, batch_size=args.batch_size, shuffle=True)
     return dataloader
@@ -150,9 +150,6 @@ def main(args):
     else:
         print("lct (jjepa weights frozen)", file=logfile, flush=True)
 
-
-
-
     # define the global base device
     world_size = torch.cuda.device_count()
     if world_size:
@@ -188,7 +185,7 @@ def main(args):
 
     # initialise the network
     model = load_model(args.load_jjepa_path, args.device)
-    net = model.context_transformer
+    net = model.target_transformer
 
     # initialize the MLP projector
     finetune_mlp_dim = args.output_dim
@@ -295,7 +292,6 @@ def main(args):
                 pbar.set_description(f"batch val loss: {batch_loss}")
             loss_e_val = np.mean(np.array(losses_e_val))
             loss_val_all.append(loss_e_val)
-            
 
         te1 = time.time()
         print(
@@ -373,13 +369,13 @@ def main(args):
         auc, imtafe = get_perf_stats(target, predicted[:, 1])
 
         print(
-                f"epoch: {epoch}, AUC: {auc}, IMTAFE: {imtafe}",
-                flush=True,
-                file=logfile,
-            )
+            f"epoch: {epoch}, AUC: {auc}, IMTAFE: {imtafe}",
+            flush=True,
+            file=logfile,
+        )
         if imtafe > rej_val_best:
             print("new highest val rejection", flush=True, file=logfile)
-            
+
             rej_val_best = imtafe
             if args.finetune:
                 torch.save(
