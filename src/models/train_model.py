@@ -462,15 +462,15 @@ def main(rank, world_size, args):
                         ):
                             param_k.data.mul_(m).add_((1.0 - m) * param_q.detach().data)
 
-                return float(loss)
+                return float(loss), float(cov_loss)
 
-            loss, etime = gpu_timer(train_step)
+            loss, cov_loss, etime = gpu_timer(train_step)
             loss_meter_train.update(loss)
             time_meter_train.update(etime)
 
             if itr % options.log_freq == 0:
                 logger.info(
-                    f"[{epoch + 1}, {itr}] training loss: {loss_meter_train.avg:.3f} ({time_meter_train.avg:.1f} ms)"
+                    f"[{epoch + 1}, {itr}] total training loss: {loss_meter_train.avg:.3f} ({time_meter_train.avg:.1f} ms, cov_loss: {cov_loss:.3f})"
                 )
                 log_gpu_stats(device)
 
@@ -577,17 +577,19 @@ def main(rank, world_size, args):
                     }
 
                     pred_repr, target_repr = model(context, target, full_jet)
-                    loss = nn.functional.mse_loss(pred_repr, target_repr)
+                    mse_loss = nn.functional.mse_loss(pred_repr, target_repr)
+                    cov_loss = covariance_loss(target_repr)
+                    loss = mse_loss + options.cov_loss_weight * cov_loss
 
-                return float(loss)
+                return float(loss), float(cov_loss)
 
-            loss_val, etime = gpu_timer(val_step)
+            loss_val, cov_loss_val, etime = gpu_timer(val_step)
             loss_meter_val.update(loss_val)
             time_meter_val.update(etime)
 
             if itr % options.log_freq == 0:
                 logger.info(
-                    f"[{epoch + 1}, {itr}] val loss: {loss_meter_val.avg:.3f} ({time_meter_val.avg:.1f} ms)"
+                    f"[{epoch + 1}, {itr}] val loss: {loss_meter_val.avg:.3f} ({time_meter_val.avg:.1f} ms, cov_loss: {cov_loss_val:.3f})"
                 )
 
         scheduler.step()
