@@ -23,6 +23,7 @@ import torch.cuda as cuda
 from src.options import Options
 from src.models.jjepa import JJEPA
 from src.dataset.JEPADataset import JEPADataset
+from src.util.cov_loss import covariance_loss
 
 
 def parse_args():
@@ -429,7 +430,9 @@ def main(rank, world_size, args):
                     }
 
                     pred_repr, target_repr = model(context, target, full_jet)
-                    loss = nn.functional.mse_loss(pred_repr, target_repr)
+                    mse_loss = nn.functional.mse_loss(pred_repr, target_repr)
+                    cov_loss = covariance_loss(target_repr)
+                    loss = mse_loss + options.cov_loss_weight * cov_loss
 
                     if options.use_amp:
                         scaler.scale(loss).backward()
