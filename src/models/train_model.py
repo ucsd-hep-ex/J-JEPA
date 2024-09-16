@@ -464,7 +464,7 @@ def main(rank, world_size, args):
 
                 return float(loss), float(cov_loss)
 
-            loss, cov_loss, etime = gpu_timer(train_step)
+            (loss, cov_loss), etime = gpu_timer(train_step)
             loss_meter_train.update(loss)
             time_meter_train.update(etime)
 
@@ -583,7 +583,7 @@ def main(rank, world_size, args):
 
                 return float(loss), float(cov_loss)
 
-            loss_val, cov_loss_val, etime = gpu_timer(val_step)
+            (loss_val, cov_loss_val), etime = gpu_timer(val_step)
             loss_meter_val.update(loss_val)
             time_meter_val.update(etime)
 
