@@ -51,6 +51,9 @@ def parse_args():
     )
     parser.add_argument("--batch_size", type=int, default=256, help="batch size")
     parser.add_argument("--lr", type=float, default=None, help="learning rate")
+    parser.add_argument(
+        "--cov_loss_weight", type=float, default=1.0, help="covariance loss weight"
+    )
     return parser.parse_args()
 
 
@@ -232,6 +235,7 @@ def main(rank, world_size, args):
     options = Options.load(args.config)
     options.batch_size = args.batch_size
     options.num_steps_per_epoch = options.num_jets // options.batch_size
+    options.cov_loss_weight = args.cov_loss_weight
 
     setup_logging(rank, args.output_dir)
     logger.info(f"Initialized (rank/world-size) {rank}/{world_size}")
