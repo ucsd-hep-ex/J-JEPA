@@ -239,6 +239,7 @@ def main(rank, world_size, args):
 
     setup_logging(rank, args.output_dir)
     logger.info(f"Initialized (rank/world-size) {rank}/{world_size}")
+    logger.info(f"covariance loss weight: {options.cov_loss_weight}")
 
     model = JJEPA(options).to(device)
     model = model.to(dtype=torch.float32)
