@@ -3,7 +3,7 @@ import torch
 
 def covariance_loss(x):
     """
-    Computes the covariance loss to reduce the covariance between different features.
+    Computes the covariance loss to reduce the covariance between different subjets.
 
     Args:
         x (torch.Tensor): Tensor of shape [batch_size, num_subjets, num_features].
@@ -13,20 +13,21 @@ def covariance_loss(x):
     """
     batch_size, num_subjets, num_features = x.size()
 
-    # Center the representations over the num_subjets dimension
+    # Center the representations over the num_features dimension
     x_centered = x - x.mean(
-        dim=1, keepdim=True
+        dim=2, keepdim=True
     )  # Shape: [batch_size, num_subjets, num_features]
 
-    # Compute covariance matrices for each sample in the batch
-    # Covariance is computed over the num_subjets dimension
+    # Compute covariance matrices between subjets for each sample in the batch
+    # Covariance is computed over the num_features dimension
     cov_x = torch.matmul(
-        x_centered.transpose(1, 2),  # Shape: [batch_size, num_features, num_subjets]
         x_centered,  # Shape: [batch_size, num_subjets, num_features]
-    )  # Shape: [batch_size, num_features, num_features]
+        x_centered.transpose(1, 2),  # Shape: [batch_size, num_features, num_subjets]
+    ) / (
+        num_features - 1
+    )  # Shape: [batch_size, num_subjets, num_subjets]
 
     # Compute the covariance loss
-    # Sum the squared off-diagonal elements of the covariance matrices
     def off_diagonal_loss(cov):
         # Sum of squares of all elements in the covariance matrices
         cov_frobenius_squared = cov.pow(2).sum(dim=(1, 2))  # Shape: [batch_size]
@@ -39,8 +40,8 @@ def covariance_loss(x):
         # Sum of squares of off-diagonal elements
         off_diag_sum = cov_frobenius_squared - cov_diag_squared  # Shape: [batch_size]
 
-        # Normalize by the number of features
-        off_diag_loss = off_diag_sum / num_features  # Shape: [batch_size]
+        # Normalize by the number of subjets
+        off_diag_loss = off_diag_sum / num_subjets  # Shape: [batch_size]
 
         # Average over the batch
         return off_diag_loss.mean()
