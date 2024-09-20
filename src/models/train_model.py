@@ -499,6 +499,12 @@ def main(rank, world_size, args):
                 logger.info(
                     f"mse loss: {mse_loss_meter_train.avg:+.3f}, cov loss: {cov_loss_meter_train.avg:+.3f}, var loss: {var_loss_meter_train.avg:+.3f}"
                 )
+                logger.info(
+                    f"[{epoch + 1}, {itr}] total training loss: {loss_dict["total_loss"]:.3f}, ({time_meter_train.avg:.1f} ms)"
+                )
+                logger.info(
+                    f"mse loss: {loss_dict["mse_loss"]:+.3f}, cov loss: {loss_dict["cov_loss"]:+.3f}, var loss: {loss_dict["var_loss"]:+.3f}"
+                )
                 log_gpu_stats(device)
 
         # validation
