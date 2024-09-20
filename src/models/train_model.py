@@ -331,6 +331,9 @@ def main(rank, world_size, args):
             val_sampler.set_epoch(epoch)
 
         loss_meter_train = AverageMeter()
+        mse_loss_meter_train = AverageMeter()
+        cov_loss_meter_train = AverageMeter()
+        var_loss_meter_train = AverageMeter()
         loss_meter_val = AverageMeter()
         time_meter_train = AverageMeter()
         time_meter_val = AverageMeter()
@@ -484,6 +487,9 @@ def main(rank, world_size, args):
 
             loss_dict, etime = gpu_timer(train_step)
             loss_meter_train.update(loss_dict["total_loss"])
+            mse_loss_meter_train.update(loss_dict["mse_loss"])
+            cov_loss_meter_train.update(loss_dict["cov_loss"])
+            var_loss_meter_train.update(loss_dict["var_loss"])
             time_meter_train.update(etime)
 
             if itr % options.log_freq == 0:
@@ -491,7 +497,7 @@ def main(rank, world_size, args):
                     f"[{epoch + 1}, {itr}] total training loss: {loss_meter_train.avg:.3f}, ({time_meter_train.avg:.1f} ms)"
                 )
                 logger.info(
-                    f"mse loss: {loss_dict['mse_loss']:.3f}, cov loss: {loss_dict['cov_loss']:.3f}, var loss: {loss_dict['var_loss']:.3f}"
+                    f"mse loss: {mse_loss_meter_train:+.3f}, cov loss: {cov_loss_meter_train:+.3f}, var loss: {var_loss_meter_train:+.3f}"
                 )
                 log_gpu_stats(device)
 
