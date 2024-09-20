@@ -378,7 +378,7 @@ def main(rank, world_size, args):
                 param_group["momentum"] = current_momentum
 
             def train_step():
-                options = Options.load(args.config)
+                # options = Options.load(args.config)
                 optimizer.zero_grad()
 
                 # print(" subjet", subjets.shape)
