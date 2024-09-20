@@ -445,13 +445,18 @@ def main(rank, world_size, args):
 
                     pred_repr, target_repr = model(context, target, full_jet)
                     mse_loss = nn.functional.mse_loss(pred_repr, target_repr)
-                    loss = mse_loss
+                    loss = mse_loss.clone()
+                    logger.info(f"mse loss: {loss}")
                     if options.cov_loss_weight > 0:
+                        print("calculating cov loss")
                         cov_loss = covariance_loss(target_repr)
                         loss += options.cov_loss_weight * cov_loss
+                        logger.info(f"after cov, loss: {loss}")
                     if options.var_loss_weight > 0:
+                        print("calculating var loss")
                         var_loss = variance_loss(target_repr)
                         loss += options.var_loss_weight * var_loss
+                        logger.info(f"after var, loss: {loss}")
 
                     if options.use_amp:
                         scaler.scale(loss).backward()
