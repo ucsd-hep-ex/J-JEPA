@@ -202,7 +202,10 @@ class Options(Namespace):
         self.checkpoint_freq: int = 10
 
         # weight for the covariance loss
-        self.cov_loss_weight: float = 1.0
+        self.cov_loss_weight: float = 0.0
+
+        # weight for the variance loss
+        self.var_loss_weight: float = 0.0
 
         # =========================================================================================
         # Scheduler Parameters
