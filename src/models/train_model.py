@@ -443,14 +443,22 @@ def main(rank, world_size, args):
                         "subjets": subjets.to(device),
                     }
 
-                    pred_repr, target_repr = model(context, target, full_jet)
+                    pred_repr, target_repr, context_repr = model(
+                        context, target, full_jet
+                    )
                     mse_loss = nn.functional.mse_loss(pred_repr, target_repr)
                     loss = mse_loss.clone()
                     if options.cov_loss_weight > 0:
-                        cov_loss = covariance_loss(target_repr)
+                        cov_loss = (
+                            covariance_loss(target_repr) / 2
+                            + covariance_loss(context_repr) / 2
+                        )
                         loss += options.cov_loss_weight * cov_loss
                     if options.var_loss_weight > 0:
-                        var_loss = variance_loss(target_repr)
+                        var_loss = (
+                            variance_loss(target_repr) / 2
+                            + variance_loss(context_repr) / 2
+                        )
                         loss += options.var_loss_weight * var_loss
 
                     if options.use_amp:
