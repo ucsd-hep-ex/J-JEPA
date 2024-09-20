@@ -446,17 +446,12 @@ def main(rank, world_size, args):
                     pred_repr, target_repr = model(context, target, full_jet)
                     mse_loss = nn.functional.mse_loss(pred_repr, target_repr)
                     loss = mse_loss.clone()
-                    logger.info(f"mse loss: {loss}")
                     if options.cov_loss_weight > 0:
-                        print("calculating cov loss")
                         cov_loss = covariance_loss(target_repr)
                         loss += options.cov_loss_weight * cov_loss
-                        logger.info(f"after cov, loss: {loss}")
                     if options.var_loss_weight > 0:
-                        print("calculating var loss")
                         var_loss = variance_loss(target_repr)
                         loss += options.var_loss_weight * var_loss
-                        logger.info(f"after var, loss: {loss}")
 
                     if options.use_amp:
                         scaler.scale(loss).backward()
@@ -503,12 +498,6 @@ def main(rank, world_size, args):
                 )
                 logger.info(
                     f"mse loss: {mse_loss_meter_train.avg:+.3f}, cov loss: {cov_loss_meter_train.avg:+.3f}, var loss: {var_loss_meter_train.avg:+.3f}"
-                )
-                logger.info(
-                    f"[{epoch + 1}, {itr}] total training loss: {loss_dict['total_loss']:.3f}, ({time_meter_train.avg:.1f} ms)"
-                )
-                logger.info(
-                    f"mse loss: {loss_dict['mse_loss']:+.3f}, cov loss: {loss_dict['cov_loss']:+.3f}, var loss: {loss_dict['var_loss']:+.3f}"
                 )
                 log_gpu_stats(device)
 
