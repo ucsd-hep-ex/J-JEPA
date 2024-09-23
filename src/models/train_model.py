@@ -334,6 +334,9 @@ def main(rank, world_size, args):
         mse_loss_meter_train = AverageMeter()
         cov_loss_meter_train = AverageMeter()
         var_loss_meter_train = AverageMeter()
+        mse_loss_meter_val = AverageMeter()
+        cov_loss_meter_val = AverageMeter()
+        var_loss_meter_val = AverageMeter()
         loss_meter_val = AverageMeter()
         time_meter_train = AverageMeter()
         time_meter_val = AverageMeter()
@@ -611,14 +614,22 @@ def main(rank, world_size, args):
                         "subjets": subjets.to(device),
                     }
 
-                    pred_repr, target_repr = model(context, target, full_jet)
+                    pred_repr, target_repr, context_repr = model(
+                        context, target, full_jet
+                    )
                     mse_loss = nn.functional.mse_loss(pred_repr, target_repr)
-                    loss = mse_loss
+                    loss = mse_loss.clone()
                     if options.cov_loss_weight > 0:
-                        cov_loss = covariance_loss(target_repr)
+                        cov_loss = (
+                            covariance_loss(target_repr) / 2
+                            + covariance_loss(context_repr) / 2
+                        )
                         loss += options.cov_loss_weight * cov_loss
                     if options.var_loss_weight > 0:
-                        var_loss = variance_loss(target_repr)
+                        var_loss = (
+                            variance_loss(target_repr) / 2
+                            + variance_loss(context_repr) / 2
+                        )
                         loss += options.var_loss_weight * var_loss
 
                 loss_dict = {
@@ -631,15 +642,19 @@ def main(rank, world_size, args):
 
             val_loss_dict, etime = gpu_timer(val_step)
             loss_meter_val.update(val_loss_dict["total_loss"])
+            mse_loss_meter_val.update(val_loss_dict["mse_loss"])
+            cov_loss_meter_val.update(val_loss_dict["cov_loss"])
+            var_loss_meter_val.update(val_loss_dict["var_loss"])
             time_meter_val.update(etime)
 
             if itr % options.log_freq == 0:
                 logger.info(
-                    f"[{epoch + 1}, {itr}] val loss: {loss_meter_val.avg:.3f} ({time_meter_val.avg:.1f} ms)"
+                    f"[{epoch + 1}, {itr}] total validation loss: {loss_meter_val.avg:.3f}, ({time_meter_val.avg:.1f} ms)"
                 )
                 logger.info(
-                    f"mse loss: {val_loss_dict['mse_loss']:.3f}, cov loss: {val_loss_dict['cov_loss']:.3f}, var loss: {val_loss_dict['var_loss']:.3f}"
+                    f"mse loss: {mse_loss_meter_val.avg:+.3f}, cov loss: {cov_loss_meter_val.avg:+.3f}, var loss: {var_loss_meter_val.avg:+.3f}"
                 )
+                log_gpu_stats(device)
 
         scheduler.step()
         if epoch % options.checkpoint_freq == 0:
