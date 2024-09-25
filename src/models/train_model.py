@@ -58,6 +58,12 @@ def parse_args():
     parser.add_argument(
         "--var_loss_weight", type=float, default=0.0, help="variance loss weight"
     )
+    parser.add_argument(
+        "--var_flatten",
+        type=int,
+        default=1,
+        help="flatten reps when calculating variance loss",
+    )
     return parser.parse_args()
 
 
@@ -459,8 +465,8 @@ def main(rank, world_size, args):
                         loss += options.cov_loss_weight * cov_loss
                     if options.var_loss_weight > 0:
                         var_loss = (
-                            variance_loss(target_repr) / 2
-                            + variance_loss(context_repr) / 2
+                            variance_loss(target_repr, args.var_flatten) / 2
+                            + variance_loss(context_repr, args.var_flatten) / 2
                         )
                         loss += options.var_loss_weight * var_loss
 
@@ -627,8 +633,8 @@ def main(rank, world_size, args):
                         loss += options.cov_loss_weight * cov_loss
                     if options.var_loss_weight > 0:
                         var_loss = (
-                            variance_loss(target_repr) / 2
-                            + variance_loss(context_repr) / 2
+                            variance_loss(target_repr, args.var_flatten) / 2
+                            + variance_loss(context_repr, args.var_flatten) / 2
                         )
                         loss += options.var_loss_weight * var_loss
 
