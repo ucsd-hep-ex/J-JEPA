@@ -324,7 +324,14 @@ def main(rank, world_size, args):
     momentum_scheduler = create_momentum_scheduler(options)
 
     losses_train = []
+    mse_losses_train = []
+    var_losses_train = []
+    cov_losses_train = []
     losses_val = []
+    mse_losses_val = []
+    var_losses_val = []
+    cov_losses_val = []
+
     lowest_val_loss = np.inf
 
     for epoch in range(options.start_epochs, options.num_epochs):
@@ -674,7 +681,13 @@ def main(rank, world_size, args):
             )
 
         losses_train.append(loss_meter_train.avg)
+        mse_losses_train.append(mse_loss_meter_train.avg)
+        cov_losses_train.append(cov_loss_meter_train.avg)
+        var_losses_train.append(var_loss_meter_train.avg)
         losses_val.append(loss_meter_val.avg)
+        mse_losses_val.append(mse_loss_meter_val.avg)
+        cov_losses_val.append(cov_loss_meter_val.avg)
+        var_losses_val.append(var_loss_meter_val.avg)
         if loss_meter_val.avg < lowest_val_loss:
             logger.info(f"new lowest val loss: {loss_meter_val.avg:.3f}")
             logger.info("Saving best model")
@@ -685,6 +698,12 @@ def main(rank, world_size, args):
             )
         np.save(os.path.join(args.output_dir, "train_losses.npy"), losses_train)
         np.save(os.path.join(args.output_dir, "val_losses.npy"), losses_val)
+        np.save(os.path.join(args.output_dir, "train_mse_losses.npy"), mse_losses_train)
+        np.save(os.path.join(args.output_dir, "val_mse_losses.npy"), mse_losses_val)
+        np.save(os.path.join(args.output_dir, "train_cov_losses.npy"), cov_losses_train)
+        np.save(os.path.join(args.output_dir, "val_cov_losses.npy"), cov_losses_val)
+        np.save(os.path.join(args.output_dir, "train_var_losses.npy"), var_losses_train)
+        np.save(os.path.join(args.output_dir, "val_var_losses.npy"), var_losses_val)
 
 
 if __name__ == "__main__":
