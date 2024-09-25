@@ -464,6 +464,11 @@ def main(rank, world_size, args):
                     )
                     mse_loss = nn.functional.mse_loss(pred_repr, target_repr)
                     loss = mse_loss.clone()
+                    # apply target and context masks when calculating covariance and variance loss
+                    context_mask_expanded = context_subjets_mask.unsqueeze(-1)
+                    masked_context_reps = context_repr * context_mask_expanded
+                    target_mask_expanded = target_subjets_mask.unsqueeze(-1)
+                    masked_target_reps = target_repr * target_mask_expanded
                     if options.cov_loss_weight > 0:
                         cov_loss = (
                             covariance_loss(target_repr) / 2
@@ -472,8 +477,9 @@ def main(rank, world_size, args):
                         loss += options.cov_loss_weight * cov_loss
                     if options.var_loss_weight > 0:
                         var_loss = (
-                            variance_loss(target_repr, args.var_flatten) / 2
-                            + variance_loss(context_repr, args.var_flatten) / 2
+                            variance_loss(masked_target_reps, target_subjets_mask) / 2
+                            + variance_loss(masked_context_reps, context_subjets_mask)
+                            / 2
                         )
                         loss += options.var_loss_weight * var_loss
 
@@ -632,6 +638,11 @@ def main(rank, world_size, args):
                     )
                     mse_loss = nn.functional.mse_loss(pred_repr, target_repr)
                     loss = mse_loss.clone()
+                    # apply target and context masks when calculating covariance and variance loss
+                    context_mask_expanded = context_subjets_mask.unsqueeze(-1)
+                    masked_context_reps = context_repr * context_mask_expanded
+                    target_mask_expanded = target_subjets_mask.unsqueeze(-1)
+                    masked_target_reps = target_repr * target_mask_expanded
                     if options.cov_loss_weight > 0:
                         cov_loss = (
                             covariance_loss(target_repr) / 2
@@ -640,8 +651,9 @@ def main(rank, world_size, args):
                         loss += options.cov_loss_weight * cov_loss
                     if options.var_loss_weight > 0:
                         var_loss = (
-                            variance_loss(target_repr, args.var_flatten) / 2
-                            + variance_loss(context_repr, args.var_flatten) / 2
+                            variance_loss(masked_target_reps, target_subjets_mask) / 2
+                            + variance_loss(masked_context_reps, context_subjets_mask)
+                            / 2
                         )
                         loss += options.var_loss_weight * var_loss
 
