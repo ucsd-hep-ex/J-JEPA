@@ -329,6 +329,8 @@ class JJEPA(nn.Module):
         self.use_predictor = options.use_predictor
         self.context_transformer = JetsTransformer(options)
         self.target_transformer = copy.deepcopy(self.context_transformer)
+        for param in self.target_transformer.parameters():
+            param.requires_grad = False
         if self.use_predictor:
             self.predictor_transformer = JetsTransformerPredictor(options)
 
