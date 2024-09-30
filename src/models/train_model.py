@@ -286,6 +286,9 @@ def main(rank, world_size, args):
         },
     ]
 
+    for p in model.target_transformer.parameters():
+        p.requires_grad = False
+
     logger.info("Using AdamW")
     if args.lr:
         options.lr = args.lr
