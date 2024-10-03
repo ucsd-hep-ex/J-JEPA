@@ -233,7 +233,9 @@ class JetsTransformerPredictor(nn.Module):
         self.predictor_embed = create_predictor_embedding_layers(
             options, input_dim=options.emb_dim
         )
-        self.calc_predictor_pos_emb = create_pos_emb_fn(options, options.predictor_emb_dim)
+        self.calc_predictor_pos_emb = create_pos_emb_fn(
+            options, options.predictor_emb_dim
+        )
 
         options.repr_dim = options.predictor_emb_dim
         options.attn_dim = options.repr_dim
@@ -327,6 +329,8 @@ class JJEPA(nn.Module):
         self.use_predictor = options.use_predictor
         self.context_transformer = JetsTransformer(options)
         self.target_transformer = copy.deepcopy(self.context_transformer)
+        for param in self.target_transformer.parameters():
+            param.requires_grad = False
         if self.use_predictor:
             self.predictor_transformer = JetsTransformerPredictor(options)
 
@@ -385,7 +389,7 @@ class JJEPA(nn.Module):
                 print(
                     f"JJEPA output - pred_repr shape: {pred_repr.shape}, context_repr shape: {context_repr.shape}"
                 )
-            return pred_repr, target_repr
+            return pred_repr, target_repr, context_repr
 
         if self.options.debug:
             print(
