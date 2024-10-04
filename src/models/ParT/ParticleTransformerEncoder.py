@@ -22,9 +22,11 @@ class ParTEncoder(nn.Module):
         activation="gelu",
         use_amp=False,
         for_inference=False,
+        aggregate_ptcl_features=False,  # not needed for J-JEPA
     ):
         super().__init__()
         self.use_amp = use_amp
+        self.aggregate_ptcl_features = aggregate_ptcl_features
         embed_dim = embed_dims[-1] if len(embed_dims) > 0 else input_dim
         default_cfg = dict(
             embed_dim=embed_dim,
@@ -111,16 +113,19 @@ class ParTEncoder(nn.Module):
 
             for block in self.blocks:
                 x = block(x, x_cls=None, padding_mask=padding_mask, attn_mask=attn_mask)
-
-            if self.cls_blocks is not None:
-                # extract class token
-                cls_tokens = self.cls_token.expand(1, x.size(1), -1)  # (1, N, C)
-                for block in self.cls_blocks:
-                    cls_tokens = block(x, x_cls=cls_tokens, padding_mask=padding_mask)
-                x_cls = self.norm(cls_tokens).squeeze(0)
-            else:
-                x = x.sum(dim=0)
-                x_cls = self.norm(x)  # (batch_size, embed_dim)
+            x_cls = x
+            if self.aggregate_ptcl_features:
+                if self.cls_blocks is not None:
+                    # extract class token
+                    cls_tokens = self.cls_token.expand(1, x.size(1), -1)  # (1, N, C)
+                    for block in self.cls_blocks:
+                        cls_tokens = block(
+                            x, x_cls=cls_tokens, padding_mask=padding_mask
+                        )
+                    x_cls = self.norm(cls_tokens).squeeze(0)
+                else:
+                    x = x.sum(dim=0)
+                    x_cls = self.norm(x)  # (batch_size, embed_dim)
             if self.fc is None:
                 return x_cls
             output = self.fc(x_cls)
