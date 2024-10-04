@@ -15,7 +15,7 @@ class ParTEncoder(nn.Module):
         pair_embed_dims=[64, 64, 64],
         num_heads=8,
         num_layers=8,
-        num_cls_layers=2,
+        num_cls_layers=0,
         block_params=None,
         cls_block_params={"dropout": 0, "attn_dropout": 0, "activation_dropout": 0},
         fc_params=[],
