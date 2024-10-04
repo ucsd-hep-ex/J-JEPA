@@ -3,7 +3,8 @@ import torch.nn as nn
 from .PairEmbed import Embed, PairEmbed
 from .Block import Block
 
-class ParticleTransformerEncoder(nn.Module):
+
+class ParTEncoder(nn.Module):
     def __init__(
         self,
         input_dim,
@@ -74,8 +75,8 @@ class ParticleTransformerEncoder(nn.Module):
 
 
 """
-Usage of the ParticleTransformerEncoder
-encoder = ParticleTransformerEncoder(input_dim=4)
+Usage of the ParTEncoder
+encoder = ParTEncoder(input_dim=4)
 batch_size = 16
 N_ptcls = 50
 x = v = torch.rand((batch_size, 4, N_ptcls))
