@@ -51,7 +51,7 @@ class Attention(nn.Module):
             self.dim, self.num_heads, batch_first=True
         )
 
-    def forward(self, x, subjet_masks):
+    def forward(self, x, particle_masks):
         if self.options.debug:
             print(f"Attention forward pass with input shape: {x.shape}")
         B, N, C = x.shape
@@ -70,7 +70,7 @@ class Attention(nn.Module):
         # attn = self.attn_drop(attn)
         # x = (attn @ v).transpose(1, 2).reshape(B, N, C)
 
-        x, _ = self.multihead_attn(q, k, v, key_padding_mask=subjet_masks)
+        x, _ = self.multihead_attn(q, k, v, key_padding_mask=particle_masks)
 
         x = self.proj(x)
         x = self.activation(x)
@@ -128,10 +128,10 @@ class Block(nn.Module):
         options.hidden_features = mlp_hidden_dim
         self.mlp = MLP(options)
 
-    def forward(self, x, subjet_masks):
+    def forward(self, x, particle_masks):
         if self.options.debug:
             print(f"Block forward pass with input shape: {x.shape}")
-        y = self.attn(self.norm1(x), subjet_masks)
+        y = self.attn(self.norm1(x), particle_masks)
         x = x + self.drop_path(y)
         x = x + self.drop_path(self.mlp(self.norm2(x)))
         if self.options.debug:
@@ -176,51 +176,64 @@ class JetsTransformer(nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
-    def forward(self, x, subjet_masks, subjets_meta, split_mask):
-        """
-        Inputs:
-            x: particles of subjets
-                shape: [B, N_sj, N_part * N_part_ftr]
-            subjet_meta: 4 vec of subjets
-                shape: [B, N_sj, N_sj_ftr=5]
-                N_sj_ftr: pt, eta, phi, E, num_part
-            split_mask: mask out certain subjet representations, depending on context/target
-                shape: [B, N_sj_to_keep]
-        Return:
-            subjet representations
-                shape: [B, N_sj, emb_dim]
-        """
-        # Flatten last two dimensions to [B, SJ, P*DP]
-        x = x["particles"]
-        B, SJ, _ = x.shape
-        x = x.view(B, SJ, -1)
+    # def forward(self, x, subjet_masks, subjets_meta, split_mask):
+    #     """
+    #     Inputs:
+    #         x: particles of subjets
+    #             shape: [B, N_sj, N_part * N_part_ftr]
+    #         subjet_meta: 4 vec of subjets
+    #             shape: [B, N_sj, N_sj_ftr=5]
+    #             N_sj_ftr: pt, eta, phi, E, num_part
+    #         split_mask: mask out certain subjet representations, depending on context/target
+    #             shape: [B, N_sj_to_keep]
+    #     Return:
+    #         subjet representations
+    #             shape: [B, N_sj, emb_dim]
+    #     """
+    #     # Flatten last two dimensions to [B, SJ, P*DP]
+    #     x = x["particles"]
+    #     B, SJ, _ = x.shape
+    #     x = x.view(B, SJ, -1)
 
-        # subjet emb
-        x = self.subjet_emb(x)
+    #     # subjet emb
+    #     x = self.subjet_emb(x)
 
-        # pos emb
-        pos_emb = self.calc_pos_emb(subjets_meta)
-        if self.options.debug:
-            print(pos_emb.shape)
+    #     # pos emb
+    #     pos_emb = self.calc_pos_emb(subjets_meta)
+    #     if self.options.debug:
+    #         print(pos_emb.shape)
+    #     x += pos_emb
+
+    #     # forward prop
+    #     for blk in self.blocks:
+    #         x = blk(x, subjet_masks)
+
+    #     # norm
+    #     x = self.norm(x)
+    #     if split_mask != None:
+    #         # select indices of certain subjet representations from split_mask
+    #         selected_subjets = x[split_mask.unsqueeze(-1).expand(-1, -1, x.shape[-1])]
+
+    #         num_selected = split_mask.sum(
+    #             dim=1
+    #         ).min()  # Minimum to handle potentially non-uniform selections
+    #         selected_subjets = selected_subjets.view(B, num_selected, x.shape[-1])
+    #         return selected_subjets
+    #     return x
+
+    def forward(self, x, particle_masks):
+        B, N, _ = x.shape
+        x = self.particle_emb(x)
+
+        # positional embedding for particles
+        pos_emb = self.calc_pos_emb(x)
         x += pos_emb
 
-        # forward prop
         for blk in self.blocks:
-            x = blk(x, subjet_masks)
+            x = blk(x, particle_masks)
 
-        # norm
         x = self.norm(x)
-        if split_mask != None:
-            # select indices of certain subjet representations from split_mask
-            selected_subjets = x[split_mask.unsqueeze(-1).expand(-1, -1, x.shape[-1])]
-
-            num_selected = split_mask.sum(
-                dim=1
-            ).min()  # Minimum to handle potentially non-uniform selections
-            selected_subjets = selected_subjets.view(B, num_selected, x.shape[-1])
-            return selected_subjets
         return x
-
 
 class JetsTransformerPredictor(nn.Module):
     def __init__(self, options: Options):
