@@ -23,6 +23,8 @@ import torch.cuda as cuda
 from src.options import Options
 from src.models.jjepa import JJEPA
 from src.dataset.JEPADataset import JEPADataset
+from src.util.cov_loss import covariance_loss
+from src.util.var_loss import variance_loss
 
 
 def parse_args():
@@ -50,6 +52,18 @@ def parse_args():
     )
     parser.add_argument("--batch_size", type=int, default=256, help="batch size")
     parser.add_argument("--lr", type=float, default=None, help="learning rate")
+    parser.add_argument(
+        "--cov_loss_weight", type=float, default=0.0, help="covariance loss weight"
+    )
+    parser.add_argument(
+        "--var_loss_weight", type=float, default=0.0, help="variance loss weight"
+    )
+    parser.add_argument(
+        "--var_flatten",
+        type=int,
+        default=1,
+        help="flatten reps when calculating variance loss",
+    )
     return parser.parse_args()
 
 
@@ -231,9 +245,13 @@ def main(rank, world_size, args):
     options = Options.load(args.config)
     options.batch_size = args.batch_size
     options.num_steps_per_epoch = options.num_jets // options.batch_size
+    options.cov_loss_weight = args.cov_loss_weight
+    options.var_loss_weight = args.var_loss_weight
 
     setup_logging(rank, args.output_dir)
     logger.info(f"Initialized (rank/world-size) {rank}/{world_size}")
+    logger.info(f"covariance loss weight: {options.cov_loss_weight}")
+    logger.info(f"variance loss weight: {options.var_loss_weight}")
 
     model = JJEPA(options).to(device)
     model = model.to(dtype=torch.float32)
@@ -309,7 +327,14 @@ def main(rank, world_size, args):
     momentum_scheduler = create_momentum_scheduler(options)
 
     losses_train = []
+    mse_losses_train = []
+    var_losses_train = []
+    cov_losses_train = []
     losses_val = []
+    mse_losses_val = []
+    var_losses_val = []
+    cov_losses_val = []
+
     lowest_val_loss = np.inf
 
     for epoch in range(options.start_epochs, options.num_epochs):
@@ -322,6 +347,12 @@ def main(rank, world_size, args):
             val_sampler.set_epoch(epoch)
 
         loss_meter_train = AverageMeter()
+        mse_loss_meter_train = AverageMeter()
+        cov_loss_meter_train = AverageMeter()
+        var_loss_meter_train = AverageMeter()
+        mse_loss_meter_val = AverageMeter()
+        cov_loss_meter_val = AverageMeter()
+        var_loss_meter_val = AverageMeter()
         loss_meter_val = AverageMeter()
         time_meter_train = AverageMeter()
         time_meter_val = AverageMeter()
@@ -369,7 +400,7 @@ def main(rank, world_size, args):
                 param_group["momentum"] = current_momentum
 
             def train_step():
-                options = Options.load(args.config)
+                # options = Options.load(args.config)
                 optimizer.zero_grad()
 
                 # print(" subjet", subjets.shape)
@@ -431,8 +462,29 @@ def main(rank, world_size, args):
                         "subjets": subjets.to(device),
                     }
 
-                    pred_repr, target_repr = model(context, target, full_jet)
-                    loss = nn.functional.mse_loss(pred_repr, target_repr)
+                    pred_repr, target_repr, context_repr = model(
+                        context, target, full_jet
+                    )
+                    mse_loss = nn.functional.mse_loss(pred_repr, target_repr)
+                    loss = mse_loss.clone()
+                    # apply target and context masks when calculating covariance and variance loss
+                    context_mask_expanded = context_subjets_mask.unsqueeze(-1)
+                    masked_context_reps = context_repr * context_mask_expanded
+                    target_mask_expanded = target_subjets_mask.unsqueeze(-1)
+                    masked_target_reps = target_repr * target_mask_expanded
+                    if options.cov_loss_weight > 0:
+                        cov_loss = (
+                            covariance_loss(target_repr) / 2
+                            + covariance_loss(context_repr) / 2
+                        )
+                        loss += options.cov_loss_weight * cov_loss
+                    if options.var_loss_weight > 0:
+                        var_loss = (
+                            variance_loss(masked_target_reps, target_subjets_mask) / 2
+                            + variance_loss(masked_context_reps, context_subjets_mask)
+                            / 2
+                        )
+                        loss += options.var_loss_weight * var_loss
 
                     if options.use_amp:
                         scaler.scale(loss).backward()
@@ -458,15 +510,27 @@ def main(rank, world_size, args):
                         ):
                             param_k.data.mul_(m).add_((1.0 - m) * param_q.detach().data)
 
-                return float(loss)
+                loss_dict = {
+                    "total_loss": float(loss),
+                    "mse_loss": float(mse_loss),
+                    "cov_loss": float(cov_loss) if options.cov_loss_weight > 0 else 0,
+                    "var_loss": float(var_loss) if options.var_loss_weight > 0 else 0,
+                }
+                return loss_dict
 
-            loss, etime = gpu_timer(train_step)
-            loss_meter_train.update(loss)
+            loss_dict, etime = gpu_timer(train_step)
+            loss_meter_train.update(loss_dict["total_loss"])
+            mse_loss_meter_train.update(loss_dict["mse_loss"])
+            cov_loss_meter_train.update(loss_dict["cov_loss"])
+            var_loss_meter_train.update(loss_dict["var_loss"])
             time_meter_train.update(etime)
 
             if itr % options.log_freq == 0:
                 logger.info(
-                    f"[{epoch + 1}, {itr}] training loss: {loss_meter_train.avg:.3f} ({time_meter_train.avg:.1f} ms)"
+                    f"[{epoch + 1}, {itr}] total training loss: {loss_meter_train.avg:.3f}, ({time_meter_train.avg:.1f} ms)"
+                )
+                logger.info(
+                    f"mse loss: {mse_loss_meter_train.avg:+.3f}, cov loss: {cov_loss_meter_train.avg:+.3f}, var loss: {var_loss_meter_train.avg:+.3f}"
                 )
                 log_gpu_stats(device)
 
@@ -572,19 +636,53 @@ def main(rank, world_size, args):
                         "subjets": subjets.to(device),
                     }
 
-                    pred_repr, target_repr = model(context, target, full_jet)
-                    loss = nn.functional.mse_loss(pred_repr, target_repr)
+                    pred_repr, target_repr, context_repr = model(
+                        context, target, full_jet
+                    )
+                    mse_loss = nn.functional.mse_loss(pred_repr, target_repr)
+                    loss = mse_loss.clone()
+                    # apply target and context masks when calculating covariance and variance loss
+                    context_mask_expanded = context_subjets_mask.unsqueeze(-1)
+                    masked_context_reps = context_repr * context_mask_expanded
+                    target_mask_expanded = target_subjets_mask.unsqueeze(-1)
+                    masked_target_reps = target_repr * target_mask_expanded
+                    if options.cov_loss_weight > 0:
+                        cov_loss = (
+                            covariance_loss(target_repr) / 2
+                            + covariance_loss(context_repr) / 2
+                        )
+                        loss += options.cov_loss_weight * cov_loss
+                    if options.var_loss_weight > 0:
+                        var_loss = (
+                            variance_loss(masked_target_reps, target_subjets_mask) / 2
+                            + variance_loss(masked_context_reps, context_subjets_mask)
+                            / 2
+                        )
+                        loss += options.var_loss_weight * var_loss
 
-                return float(loss)
+                loss_dict = {
+                    "total_loss": float(loss),
+                    "mse_loss": float(mse_loss),
+                    "cov_loss": float(cov_loss) if options.cov_loss_weight > 0 else 0,
+                    "var_loss": float(var_loss) if options.var_loss_weight > 0 else 0,
+                }
+                return loss_dict
 
-            loss_val, etime = gpu_timer(val_step)
-            loss_meter_val.update(loss_val)
+            val_loss_dict, etime = gpu_timer(val_step)
+            loss_meter_val.update(val_loss_dict["total_loss"])
+            mse_loss_meter_val.update(val_loss_dict["mse_loss"])
+            cov_loss_meter_val.update(val_loss_dict["cov_loss"])
+            var_loss_meter_val.update(val_loss_dict["var_loss"])
             time_meter_val.update(etime)
 
             if itr % options.log_freq == 0:
                 logger.info(
-                    f"[{epoch + 1}, {itr}] val loss: {loss_meter_val.avg:.3f} ({time_meter_val.avg:.1f} ms)"
+                    f"[{epoch + 1}, {itr}] total validation loss: {loss_meter_val.avg:.3f}, ({time_meter_val.avg:.1f} ms)"
                 )
+                logger.info(
+                    f"mse loss: {mse_loss_meter_val.avg:+.3f}, cov loss: {cov_loss_meter_val.avg:+.3f}, var loss: {var_loss_meter_val.avg:+.3f}"
+                )
+                log_gpu_stats(device)
 
         scheduler.step()
         if epoch % options.checkpoint_freq == 0:
@@ -598,7 +696,13 @@ def main(rank, world_size, args):
             )
 
         losses_train.append(loss_meter_train.avg)
+        mse_losses_train.append(mse_loss_meter_train.avg)
+        cov_losses_train.append(cov_loss_meter_train.avg)
+        var_losses_train.append(var_loss_meter_train.avg)
         losses_val.append(loss_meter_val.avg)
+        mse_losses_val.append(mse_loss_meter_val.avg)
+        cov_losses_val.append(cov_loss_meter_val.avg)
+        var_losses_val.append(var_loss_meter_val.avg)
         if loss_meter_val.avg < lowest_val_loss:
             logger.info(f"new lowest val loss: {loss_meter_val.avg:.3f}")
             logger.info("Saving best model")
@@ -609,6 +713,12 @@ def main(rank, world_size, args):
             )
         np.save(os.path.join(args.output_dir, "train_losses.npy"), losses_train)
         np.save(os.path.join(args.output_dir, "val_losses.npy"), losses_val)
+        np.save(os.path.join(args.output_dir, "train_mse_losses.npy"), mse_losses_train)
+        np.save(os.path.join(args.output_dir, "val_mse_losses.npy"), mse_losses_val)
+        np.save(os.path.join(args.output_dir, "train_cov_losses.npy"), cov_losses_train)
+        np.save(os.path.join(args.output_dir, "val_cov_losses.npy"), cov_losses_val)
+        np.save(os.path.join(args.output_dir, "train_var_losses.npy"), var_losses_train)
+        np.save(os.path.join(args.output_dir, "val_var_losses.npy"), var_losses_val)
 
 
 if __name__ == "__main__":

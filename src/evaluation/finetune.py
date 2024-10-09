@@ -60,8 +60,7 @@ def load_data(dataset_path, tag=None):
     return dataloader
 
 
-def load_model(model_path=None, device="cpu"):
-    options = Options.load(args.option_file)
+def load_model(options, model_path=None, device="cpu"):
     model = JJEPA(options).to(device)
     if model_path:
         model.load_state_dict(torch.load(model_path, map_location=device))
@@ -119,6 +118,9 @@ def get_perf_stats(labels, measures):
 def main(args):
     t0 = time.time()
     # set up results directory
+    options = Options.load(args.option_file)
+    args.output_dim = options.emb_dim
+
     if args.flatten:
         args.output_dim *= 20
     out_dir = args.out_dir
@@ -184,7 +186,7 @@ def main(args):
     )
 
     # initialise the network
-    model = load_model(args.load_jjepa_path, args.device)
+    model = load_model(options, args.load_jjepa_path, args.device)
     net = model.target_transformer
 
     # initialize the MLP projector
@@ -470,14 +472,6 @@ if __name__ == "__main__":
         action="store",
         default=None,
         help="Load weights from JJEPA model if enabled",
-    )
-    parser.add_argument(
-        "--output-dim",
-        type=int,
-        action="store",
-        dest="output_dim",
-        default=1024,
-        help="dimension of the output of transformer-encoder",
     )
     parser.add_argument(
         "--n-epoch",
