@@ -11,6 +11,8 @@ from src.options import Options
 from src.util.tensors import trunc_normal_
 from src.util.DimensionCheckLayer import DimensionCheckLayer
 
+from src.models.ParT.ParticleTransformerEncoder import ParTEncoder
+
 # A dictionary for normalization layers
 NORM_LAYERS = {
     "None": None,
@@ -235,6 +237,7 @@ class JetsTransformer(nn.Module):
         x = self.norm(x)
         return x
 
+
 class JetsTransformerPredictor(nn.Module):
     def __init__(self, options: Options):
         super().__init__()
@@ -304,7 +307,6 @@ class JetsTransformerPredictor(nn.Module):
         assert trgt_pos_emb.shape[2] == D
         # (B, N_trgt, D) -> (B*N_trgt, 1, D) following FAIR_src
         trgt_pos_emb = trgt_pos_emb.view(B * N_trgt, 1, D)
-        # TODO: add an learnable token
         pred_token = self.mask_token.repeat(
             trgt_pos_emb.size(0), trgt_pos_emb.size(1), 1
         )
@@ -340,7 +342,10 @@ class JJEPA(nn.Module):
         if self.options.debug:
             print("Initializing JJEPA module")
         self.use_predictor = options.use_predictor
+        self.use_parT_encoder = options.use_parT_encoder
         self.context_transformer = JetsTransformer(options)
+        if self.use_parT_encoder:
+            self.context_transformer = ParTEncoder(options)
         self.target_transformer = copy.deepcopy(self.context_transformer)
         for param in self.target_transformer.parameters():
             param.requires_grad = False

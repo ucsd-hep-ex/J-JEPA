@@ -26,11 +26,12 @@ class Options(Namespace):
         # number of particle features per particle
         self.num_part_ftr: int = 4
 
-        self.input_dim: int = self.num_particles * self.num_part_ftr
-
         # =========================================================================================
         # Network Architecture
         # =========================================================================================
+
+        # Whether to use the particle transformer encoder
+        self.use_parT_encoder: bool = False
 
         # Use predictor
         self.use_predictor: bool = True
@@ -132,6 +133,39 @@ class Options(Namespace):
         """
         # -------------------------------------------------
         self.normalization: str = "LayerNorm"
+
+        # =========================================================================================
+        # ParTEncoder specific parameters
+        # =========================================================================================
+
+        # projector MLP params, None -> no projector after attention layers.
+        # Format: [(out_dim, drop_rate) for layer in range(num_layers)]
+        self.fc_params: list = None
+
+        # parameters for class attention blocks (used for aggregating ptcl features into jet features)
+        self.cls_block_params: dict = {
+            "dropout": 0,
+            "attn_dropout": 0,
+            "activation_dropout": 0,
+        }
+
+        # parameters for attention blocks
+        self.block_params: list = None
+
+        # number of class attention blocks (used for aggregating ptcl features into jet features)
+        self.num_cls_layers: int = 0
+
+        # number of input dimensions for pair embedding
+        self.pair_input_dim: int = 4
+
+        # embedding dimensions for pair embedding blocks
+        self.pair_embed_dims = [64, 64, 64]
+
+        # embedding dimensions for the transformer layers
+        self.embed_dims = [128, 512, 128]
+
+        # input dim for particles (default 4: deta, dphi, pt_log, e_log)
+        self.input_dim: int = 4
 
         # =========================================================================================
         # JJEPA specific parameters

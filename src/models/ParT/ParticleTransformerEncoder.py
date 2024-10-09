@@ -9,75 +9,69 @@ from .utils import trunc_normal_
 class ParTEncoder(nn.Module):
     def __init__(
         self,
-        input_dim,
-        pair_input_dim=4,
-        embed_dims=[128, 512, 128],
-        pair_embed_dims=[64, 64, 64],
-        num_heads=8,
-        num_layers=8,
-        num_cls_layers=0,
-        block_params=None,
-        cls_block_params={"dropout": 0, "attn_dropout": 0, "activation_dropout": 0},
-        fc_params=[],
-        activation="gelu",
-        use_amp=False,
         for_inference=False,
         aggregate_ptcl_features=False,  # not needed for J-JEPA
+        options=None,
     ):
         super().__init__()
-        self.use_amp = use_amp
         self.aggregate_ptcl_features = aggregate_ptcl_features
-        embed_dim = embed_dims[-1] if len(embed_dims) > 0 else input_dim
+        embed_dim = (
+            options.embed_dims[-1] if len(options.embed_dims) > 0 else options.input_dim
+        )
         default_cfg = dict(
             embed_dim=embed_dim,
-            num_heads=num_heads,
+            num_heads=options.num_heads,
             ffn_ratio=4,
             dropout=0.1,
             attn_dropout=0.1,
             activation_dropout=0.1,
             add_bias_kv=False,
-            activation=activation,
+            activation=options.activation,
             scale_fc=True,
             scale_attn=True,
             scale_heads=True,
             scale_resids=True,
         )
         cfg_block = default_cfg.copy()
-        if block_params is not None:
-            cfg_block.update(block_params)
+        if options.block_params is not None:
+            cfg_block.update(options.block_params)
 
         cfg_cls_block = copy.deepcopy(default_cfg)
-        if cls_block_params is not None:
-            cfg_cls_block.update(cls_block_params)
+        if options.cls_block_params is not None:
+            cfg_cls_block.update(options.cls_block_params)
 
         self.embed = (
-            Embed(input_dim, embed_dims, activation=activation)
-            if len(embed_dims) > 0
+            Embed(options.input_dim, options.embed_dims, activation=options.activation)
+            if len(options.embed_dims) > 0
             else nn.Identity()
         )
         self.pair_embed = (
             PairEmbed(
-                pair_input_dim,
+                options.pair_input_dim,
                 0,
-                pair_embed_dims + [cfg_block["num_heads"]],
+                options.pair_embed_dims + [cfg_block["num_heads"]],
                 remove_self_pair=True,
                 use_pre_activation_pair=True,
                 for_onnx=for_inference,
             )
-            if pair_embed_dims is not None and pair_input_dim > 0
+            if options.pair_embed_dims is not None and options.pair_input_dim > 0
             else None
         )
-        self.blocks = nn.ModuleList([Block(**cfg_block) for _ in range(num_layers)])
+        self.blocks = nn.ModuleList(
+            [Block(**cfg_block) for _ in range(options.num_layers)]
+        )
         self.cls_blocks = (
-            nn.ModuleList([Block(**cfg_cls_block) for _ in range(num_cls_layers)])
-            if num_cls_layers > 0
+            nn.ModuleList(
+                [Block(**cfg_cls_block) for _ in range(options.num_cls_layers)]
+            )
+            if self.num_cls_layers > 0
             else None
         )
         self.norm = nn.LayerNorm(embed_dim)
-        if fc_params is not None:
+        if options.fc_params is not None:
             fcs = []
             in_dim = embed_dim
-            for out_dim, drop_rate in fc_params:
+            for out_dim, drop_rate in options.fc_params:
                 fcs.append(
                     nn.Sequential(
                         nn.Linear(in_dim, out_dim), nn.ReLU(), nn.Dropout(drop_rate)
