@@ -73,7 +73,6 @@ class Attention(nn.Module):
         x, _ = self.multihead_attn(q, k, v, key_padding_mask=subjet_masks)
 
         x = self.proj(x)
-        x = self.activation(x)
         x = self.proj_drop(x)
         if self.options.debug:
             print(f"Attention output shape: {x.shape}")
