@@ -43,8 +43,6 @@ class Attention(nn.Module):
         self.scale = options.qk_scale or self.head_dim**-0.5
         self.W_qkv = nn.Linear(self.dim, self.dim * 3, bias=options.qkv_bias)
         self.attn_drop = nn.Dropout(options.attn_drop)
-        self.proj = nn.Linear(self.dim, self.dim)
-        self.activation = create_activation(options.activation, self.dim)
         self.proj_drop = nn.Dropout(options.proj_drop)
 
         self.multihead_attn = nn.MultiheadAttention(
@@ -72,7 +70,6 @@ class Attention(nn.Module):
 
         x, _ = self.multihead_attn(q, k, v, key_padding_mask=subjet_masks)
 
-        x = self.proj(x)
         x = self.proj_drop(x)
         if self.options.debug:
             print(f"Attention output shape: {x.shape}")
