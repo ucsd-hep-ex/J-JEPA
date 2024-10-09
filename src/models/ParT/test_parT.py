@@ -1,13 +1,12 @@
 import sys
 import torch
-from ParticleTransformerEncoder import ParTEncoder
-
-sys.path.insert(0, "../../")
+from src.models.ParT.ParticleTransformerEncoder import ParTEncoder
 from src.options import Options
 
 
 if __name__ == "__main__":
     options = Options()
+    options.fc_params = [(128, 0), (256, 0)]
     options.display()
     encoder = ParTEncoder(options=options)
 

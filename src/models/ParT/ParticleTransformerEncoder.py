@@ -14,6 +14,7 @@ class ParTEncoder(nn.Module):
         options=None,
     ):
         super().__init__()
+        self.options = options
         self.aggregate_ptcl_features = aggregate_ptcl_features
         embed_dim = (
             options.embed_dims[-1] if len(options.embed_dims) > 0 else options.input_dim
@@ -64,7 +65,7 @@ class ParTEncoder(nn.Module):
             nn.ModuleList(
                 [Block(**cfg_cls_block) for _ in range(options.num_cls_layers)]
             )
-            if self.num_cls_layers > 0
+            if options.num_cls_layers > 0
             else None
         )
         self.norm = nn.LayerNorm(embed_dim)
@@ -96,7 +97,7 @@ class ParTEncoder(nn.Module):
         # v: (N, 4, P) [px,py,pz,energy]
         # mask: (N, 1, P) -- real particle = 1, padded = 0
         padding_mask = ~mask.squeeze(1)  # (N, P)
-        with torch.cuda.amp.autocast(enabled=self.use_amp):
+        with torch.cuda.amp.autocast(enabled=self.options.use_amp):
             # input embedding
             x = self.embed(x).masked_fill(~mask.permute(2, 0, 1), 0)  # (P, N, C)
             attn_mask = None
@@ -121,9 +122,9 @@ class ParTEncoder(nn.Module):
                     x = x.sum(dim=0)
                     x_cls = self.norm(x)  # (batch_size, embed_dim)
             if self.fc is None:
-                return x_cls
+                return x_cls.transpose(0, 1)
             output = self.fc(x_cls)
-            return output
+            return output.transpose(0, 1)  # (batch_size, num_ptcls, embed_dim)
 
 
 """
