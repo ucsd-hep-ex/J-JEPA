@@ -287,14 +287,13 @@ class JetsTransformerPredictor(nn.Module):
         assert trgt_pos_emb.shape[2] == D
         # (B, N_trgt, D) -> (B*N_trgt, 1, D) following FAIR_src
         trgt_pos_emb = trgt_pos_emb.view(B * N_trgt, 1, D)
-        # TODO: add an learnable token
         pred_token = self.mask_token.repeat(
             trgt_pos_emb.size(0), trgt_pos_emb.size(1), 1
         )
         pred_token += trgt_pos_emb
 
         # (B, N_ctxt, D) -> (B * N_trgt, N_ctxt, D)
-        x = x.repeat(N_trgt, 1, 1)
+        x = x.repeat_interleave(N_trgt, 1, 1)
 
         x = torch.cat([x, pred_token], axis=1)
 
