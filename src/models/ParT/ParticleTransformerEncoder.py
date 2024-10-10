@@ -1,9 +1,11 @@
 import copy
 import torch
 import torch.nn as nn
-from .PairEmbed import Embed, PairEmbed
-from .Block import Block
-from .utils import trunc_normal_
+from src.models.ParT.PairEmbed import Embed, PairEmbed
+from src.models.ParT.Block import Block
+from src.models.ParT.utils import trunc_normal_
+from src.layers import create_embedding_layers, create_predictor_embedding_layers
+from src.util.positional_embedding import create_space_pos_emb_fn
 
 
 class ParTEncoder(nn.Module):
@@ -138,3 +140,150 @@ mask_shape = (batch_size, 1, N_ptcls)
 mask = (torch.rand(mask_shape) > 0.5)
 encoded_features = encoder(x, v, mask)
 """
+
+
+class ParTPredictor(nn.Module):
+    def __init__(
+        self,
+        options=None,
+    ):
+        super().__init__()
+        self.options = options
+        embed_dim = options.predictor_emb_dim
+
+        default_cfg = dict(
+            embed_dim=embed_dim,
+            num_heads=options.num_heads,
+            ffn_ratio=4,
+            dropout=options.dropout,
+            attn_dropout=options.attn_drop,
+            activation_dropout=options.dropout,
+            add_bias_kv=False,
+            activation=options.activation,
+            scale_fc=True,
+            scale_attn=True,
+            scale_heads=True,
+            scale_resids=True,
+        )
+        cfg_block = default_cfg.copy()
+        if options.block_params is not None:
+            cfg_block.update(options.block_params)
+
+        # Embedding layers
+        self.embed = create_predictor_embedding_layers(
+            options, input_dim=options.predictor_emb_dim
+        )
+        self.calc_predictor_pos_emb = create_space_pos_emb_fn(options.predictor_emb_dim)
+
+        # Transformer blocks
+        self.blocks = nn.ModuleList(
+            [Block(**cfg_block) for _ in range(options.pred_depth)]
+        )
+
+        # Normalization and projection layers
+        self.norm = nn.LayerNorm(embed_dim)
+        self.predictor_proj = nn.Linear(
+            options.predictor_emb_dim, options.emb_dim, bias=True
+        )
+
+        # Mask token initialization
+        self.init_std = options.init_std
+        self.mask_token = nn.Parameter(torch.zeros(1, 1, embed_dim), requires_grad=True)
+        trunc_normal_(self.mask_token, std=self.init_std)
+
+    @torch.jit.ignore
+    def no_weight_decay(self):
+        return {
+            "mask_token",
+        }
+
+    def forward(
+        self,
+        x,
+        ctxt_particle_mask,
+        trgt_particle_mask,
+        target_particle_ftrs,
+        context_particle_ftrs,
+    ):
+        """
+        Inputs:
+            x: context particle representations
+                shape: [B, N_ctxt, emb_dim]
+            ctxt_particle_mask: mask for zero-padded context particles
+                shape: [B, 1, N_ctxt]
+            trgt_particle_mask: mask for zero-padded target particles
+                shape: [B, 1, N_trgt]
+            target_particle_ftrs: target particle 4-vector (px, py, pz, e)
+                shape: [B, N_trgt, 4]
+            context_particle_ftrs: context particle 4-vector (px, py, pz, e)
+                shape: [B, N_ctxt, 4]
+        Output:
+            predicted target particle representations
+                shape: [B, N_trgt, predictor_output_dim]
+        """
+        if self.options.debug:
+            print(f"ParTPredictor forward pass with input shape: {x.shape}")
+
+        # Apply embedding to context particles
+        x = self.embed(x)
+        x += self.calc_predictor_pos_emb(context_particle_ftrs)
+
+        B, N_ctxt, D = x.shape
+        _, N_trgt, _ = target_particle_ftrs.shape
+
+        # Prepare position embeddings for target particles
+        trgt_pos_emb = self.calc_predictor_pos_emb(target_particle_ftrs)
+        assert trgt_pos_emb.shape[2] == D
+
+        # Create prediction tokens
+        trgt_pos_emb = trgt_pos_emb.view(B * N_trgt, 1, D)
+        pred_token = self.mask_token.expand(
+            trgt_pos_emb.size(0), trgt_pos_emb.size(1), D
+        )
+        pred_token = (
+            pred_token + trgt_pos_emb
+        )  # avoid in-place operation for parameters that require grad
+
+        # Repeat context embeddings for each target
+        x = x.repeat_interleave(N_trgt, dim=0)
+
+        # Concatenate context embeddings and prediction tokens
+        x = torch.cat([x, pred_token], dim=1)
+
+        # Prepare masks
+        # Expand context subjet masks
+        ctxt_particle_mask_expanded = ctxt_particle_mask.repeat(1, N_trgt, 1)
+        ctxt_particle_mask_expanded = ctxt_particle_mask_expanded.view(
+            B * N_trgt, N_ctxt
+        )
+
+        # Expand target particle masks
+        trgt_particle_mask_expanded = trgt_particle_mask.view(B * N_trgt, 1)
+
+        # Combine masks
+        combined_masks = torch.cat(
+            [ctxt_particle_mask_expanded, trgt_particle_mask_expanded], dim=1
+        )
+
+        # Create padding mask for transformer (True for positions to be masked)
+        padding_mask = ~combined_masks.bool()
+        # Transpose for transformer input (Seq_len, Batch, Embedding)
+        x = x.transpose(0, 1)  # Shape: (N_ctxt + 1, B * N_trgt, D)
+
+        # Pass through transformer blocks
+        for block in self.blocks:
+            x = block(x, x_cls=None, padding_mask=padding_mask)
+
+        # Transpose back to (Batch, Seq_len, Embedding)
+        x = x.transpose(0, 1)
+        x = self.norm(x)
+
+        # Extract predictions for target particles
+        x = x[:, N_ctxt:, :]  # Shape: (B * N_trgt, 1, D)
+        x = self.predictor_proj(x)
+
+        if self.options.debug:
+            print(f"ParTPredictor output shape: {x.shape}")
+
+        # Reshape to (B, N_trgt, predictor_output_dim)
+        return x.view(B, N_trgt, -1)
