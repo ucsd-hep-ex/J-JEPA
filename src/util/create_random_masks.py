@@ -1,13 +1,126 @@
 import torch
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+import os
+import numpy as np
+import awkward as ak
+import fastjet
+import vector
+
+
+def get_subjets(px, py, pz, e, JET_ALGO="CA", jet_radius=0.2):
+    """
+    Clusters particles into subjets using the specified jet clustering algorithm and jet radius,
+    then returns information about the subjets sorted by their transverse momentum (pT) in descending order.
+
+    Each particle is represented by its momentum components (px, py, pz) and energy (e). The function
+    filters out zero-momentum particles, clusters the remaining particles into jets using the specified
+    jet algorithm and radius, and then retrieves each subjet's pT, eta, and phi, along with the indices
+    of the original particles that constitute each subjet.
+
+    Parameters:
+    - px (np.ndarray): NumPy array containing the x-component of momentum for each particle.
+    - py (np.ndarray): NumPy array containing the y-component of momentum for each particle.
+    - pz (np.ndarray): NumPy array containing the z-component of momentum for each particle.
+    - e (np.ndarray): NumPy array containing the energy of each particle.
+    - JET_ALGO (str, optional): The jet clustering algorithm to use. Choices are "CA" (Cambridge/Aachen), "kt", and "antikt".
+      The default is "CA".
+    - jet_radius (float, optional): The radius parameter for the jet clustering algorithm. The default is 0.2.
+
+    Returns:
+    - List[Dict]: A list of dictionaries, one for each subjet. Each dictionary contains two keys:
+        "features", mapping to another dictionary with keys "pT", "eta", and "phi" representing the subjet's
+        kinematic properties, and "indices", mapping to a list of indices corresponding to the original
+        particles that make up the subjet. The list is sorted by the subjets' pT in descending order.
+
+    Example:
+    >>> px = np.array([...])
+    >>> py = np.array([...])
+    >>> pz = np.array([...])
+    >>> e = np.array([...])
+    >>> subjets_info_sorted = get_subjets(px, py, pz, e, JET_ALGO="kt", jet_radius=0.2)
+    >>> print(subjets_info_sorted[0])  # Access the leading subjet information
+    """
+
+    if JET_ALGO == "kt":
+        JET_ALGO = fastjet.kt_algorithm
+    elif JET_ALGO == "antikt":
+        JET_ALGO = fastjet.antikt_algorithm
+    else:  # Default to "CA" if not "kt" or "antikt"
+        JET_ALGO = fastjet.cambridge_algorithm
+
+    jetdef = fastjet.JetDefinition(JET_ALGO, jet_radius)
+
+    # Ensure px, py, pz, and e are filtered arrays of non-zero values
+    px_nonzero = px[px != 0]
+    py_nonzero = py[py != 0]
+    pz_nonzero = pz[pz != 0]
+    e_nonzero = e[e != 0]
+
+    jet = ak.zip(
+        {
+            "px": px_nonzero,
+            "py": py_nonzero,
+            "pz": pz_nonzero,
+            "E": e_nonzero,
+        },
+        with_name="MomentumArray4D",
+    )
+
+    # Create PseudoJet objects for non-zero particles
+    pseudojets = []
+    for i in range(len(px_nonzero)):
+        particle = jet[i]
+        pj = fastjet.PseudoJet(
+            particle.px.item(),
+            particle.py.item(),
+            particle.pz.item(),
+            particle.E.item(),
+        )
+        pj.set_user_index(i)
+        pseudojets.append(pj)
+
+    cluster = fastjet.ClusterSequence(pseudojets, jetdef)
+
+    subjets = cluster.inclusive_jets()  # Get the jets from the clustering
+
+    subjets_info = []  # List to store dictionaries for each subjet
+
+    for subjet in subjets:
+        # Extract features
+        features = {
+            "pT": subjet.pt(),
+            "eta": subjet.eta(),
+            "phi": subjet.phi(),
+            "num_ptcls": 0,
+        }
+
+        # Extract indices, sort by pT
+        indices = [constituent.user_index() for constituent in subjet.constituents()]
+        indices = sorted(
+            indices
+        )  # since the original particles were already sorted by pT
+        features["num_ptcls"] = len(indices)
+
+        # Create dictionary for the current subjet and append to the list
+        subjet_dict = {"features": features, "indices": indices}
+        subjets_info.append(subjet_dict)
+
+    # subjets_info now contains the required dictionaries for each subjet
+    subjets_info_sorted = sorted(
+        subjets_info, key=lambda x: x["features"]["pT"], reverse=True
+    )
+
+    # subjets_info_sorted now contains the subjets sorted by pT in descending order
+    return subjets_info_sorted
+
 
 def create_random_masks(p4_spatial, ratio, max_targets):
     """
     Creates context and target masks for a batch of jets based on the provided ratio and max_targets.
 
     Parameters:
-    - p4_spatial: Torch tensor of shape (batch_size, 4, total_num_particles_padded) containing px, py, pz, 
+    - p4_spatial: Torch tensor of shape (batch_size, 4, total_num_particles_padded) containing px, py, pz,
         and e (energy) of a batch of jets for input into get_subjets(px, py, pz, e, JET_ALGO="CA", jet_radius=0.2)
     - ratio: Float between 0 and 1, specifying the ratio of target particles to total non-padded particles.
     - max_targets: Integer, maximum number of target particles each jet should have.
@@ -18,15 +131,19 @@ def create_random_masks(p4_spatial, ratio, max_targets):
     """
     batch_size, _, total_num_particles_padded = p4_spatial.shape
 
-    context_masks = torch.zeros((batch_size, total_num_particles_padded), dtype=torch.float32)
-    target_masks = torch.zeros((batch_size, total_num_particles_padded), dtype=torch.float32)
+    context_masks = torch.zeros(
+        (batch_size, total_num_particles_padded), dtype=torch.float32
+    )
+    target_masks = torch.zeros(
+        (batch_size, total_num_particles_padded), dtype=torch.float32
+    )
 
     for i in tqdm(range(batch_size)):
         # Extract px, py, pz, e for this jet
         px = p4_spatial[i, 0, :]  # Shape: (total_num_particles_padded,)
         py = p4_spatial[i, 1, :]
         pz = p4_spatial[i, 2, :]
-        e  = p4_spatial[i, 3, :]
+        e = p4_spatial[i, 3, :]
 
         # Get N_non_padded by counting non-zero entries in e
         N_non_padded = torch.count_nonzero(e)
@@ -36,7 +153,11 @@ def create_random_masks(p4_spatial, ratio, max_targets):
 
         # Create masks for this jet
         context_mask, target_mask = create_random_masks_single(
-            subjets_info_sorted, N_non_padded.item(), total_num_particles_padded, ratio, max_targets
+            subjets_info_sorted,
+            N_non_padded.item(),
+            total_num_particles_padded,
+            ratio,
+            max_targets,
         )
 
         # Assign to the batch masks
@@ -45,7 +166,10 @@ def create_random_masks(p4_spatial, ratio, max_targets):
 
     return context_masks, target_masks
 
-def create_random_masks_single(subjets_info_sorted, N_non_padded, total_num_particles_padded, ratio, max_targets):
+
+def create_random_masks_single(
+    subjets_info_sorted, N_non_padded, total_num_particles_padded, ratio, max_targets
+):
     """
     Creates context and target masks for a single jet.
 
@@ -69,7 +193,7 @@ def create_random_masks_single(subjets_info_sorted, N_non_padded, total_num_part
 
     # Collect particles from subjets starting from the highest pT subjet
     for subjet in subjets_info_sorted:
-        indices = subjet['indices']  # Indices of particles in the subjet
+        indices = subjet["indices"]  # Indices of particles in the subjet
         for index in indices:
             if index not in selected_indices:
                 selected_indices.append(index)
@@ -86,9 +210,15 @@ def create_random_masks_single(subjets_info_sorted, N_non_padded, total_num_part
         num_padded_to_select = min(num_needed, num_padded_available)
         if num_padded_to_select > 0:
             additional_padded_indices = torch.tensor(
-                torch.multinomial(torch.ones(num_padded_available), num_padded_to_select, replacement=False)
+                torch.multinomial(
+                    torch.ones(num_padded_available),
+                    num_padded_to_select,
+                    replacement=False,
+                )
             )
-            selected_indices.extend(padded_indices[i] for i in additional_padded_indices.tolist())
+            selected_indices.extend(
+                padded_indices[i] for i in additional_padded_indices.tolist()
+            )
 
     # Set target_mask for selected indices
     target_mask[selected_indices] = 1.0
@@ -98,11 +228,23 @@ def create_random_masks_single(subjets_info_sorted, N_non_padded, total_num_part
 
     return context_mask, target_mask
 
-def plot_particles(eta, phi, pT, context_mask, target_mask, valid_mask, jet_idx, save_dir, min_size=10, max_size=200):
+
+def plot_particles(
+    eta,
+    phi,
+    pT,
+    context_mask,
+    target_mask,
+    valid_mask,
+    jet_idx,
+    save_dir,
+    min_size=10,
+    max_size=200,
+):
     """
     Plot the eta and phi of particles, color coding them based on context/target masks,
     and vary the size of each point based on the transverse momentum (pT).
-    
+
     Parameters:
     - eta: Torch tensor of pseudorapidity values.
     - phi: Torch tensor of azimuthal angle values.
@@ -136,36 +278,38 @@ def plot_particles(eta, phi, pT, context_mask, target_mask, valid_mask, jet_idx,
     if pT_max > pT_min:
         pT_normalized = (pT - pT_min) / (pT_max - pT_min)
     else:
-        pT_normalized = np.ones_like(pT) * 0.5  # Default normalization if pT is constant
+        pT_normalized = (
+            np.ones_like(pT) * 0.5
+        )  # Default normalization if pT is constant
 
     sizes = min_size + pT_normalized * (max_size - min_size)
 
     # Plot context particles
-    context_indices = (context_mask == 1)
+    context_indices = context_mask == 1
     plt.scatter(
         eta[context_indices],
         phi[context_indices],
         s=sizes[context_indices],
-        c='blue',
+        c="blue",
         alpha=0.7,
-        label='Context'
+        label="Context",
     )
 
     # Plot target particles
-    target_indices = (target_mask == 1)
+    target_indices = target_mask == 1
     plt.scatter(
         eta[target_indices],
         phi[target_indices],
         s=sizes[target_indices],
-        c='red',
+        c="red",
         alpha=0.7,
-        label='Target'
+        label="Target",
     )
 
     # Set plot labels and title
-    plt.xlabel('Eta')
-    plt.ylabel('Phi')
-    plt.title(f'Particle Distribution: Context vs Target for Jet {jet_idx}')
+    plt.xlabel("Eta")
+    plt.ylabel("Phi")
+    plt.title(f"Particle Distribution: Context vs Target for Jet {jet_idx}")
 
     # Adjust axes limits for better visualization
     plt.xlim(eta.min() - 0.1, eta.max() + 0.1)
