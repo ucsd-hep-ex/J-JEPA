@@ -293,7 +293,7 @@ class JetsTransformerPredictor(nn.Module):
         pred_token += trgt_pos_emb
 
         # (B, N_ctxt, D) -> (B * N_trgt, N_ctxt, D)
-        x = x.repeat_interleave(N_trgt, 1, 1)
+        x = x.repeat_interleave(N_trgt, dim=0)
 
         x = torch.cat([x, pred_token], axis=1)
 
