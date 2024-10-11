@@ -138,7 +138,7 @@ def main(args):
         os.makedirs(out_dir, exist_ok=True)
 
     # initialise logfile
-    args.logfile = out_dir + "logfile.txt"
+    args.logfile = f"{out_dir}/logfile.txt"
     logfile = open(args.logfile, "a")
     print("logfile initialised", file=logfile, flush=True)
     if args.flatten:
@@ -326,26 +326,22 @@ def main(args):
 
         # save the latest model
         if args.finetune:
-            torch.save(net.state_dict(), out_dir + "jjepa_finetune_last" + ".pt")
-        torch.save(proj.state_dict(), out_dir + "projector_finetune_last" + ".pt")
+            torch.save(net.state_dict(), f"{out_dir}/jjepa_finetune_last.pt")
+        torch.save(proj.state_dict(), f"{out_dir}/projector_finetune_last.pt")
 
         # save the model if lowest val loss is achieved
         if loss_val_all[-1] < l_val_best:
             # print("new lowest val loss", flush=True, file=logfile)
             l_val_best = loss_val_all[-1]
             if args.finetune:
-                torch.save(
-                    net.state_dict(), out_dir + "jjepa_finetune_best_loss" + ".pt"
-                )
-            torch.save(
-                proj.state_dict(), out_dir + "projector_finetune_best_loss" + ".pt"
-            )
+                torch.save(net.state_dict(), f"{out_dir}/jjepa_finetune_best_loss.pt")
+            torch.save(proj.state_dict(), f"{out_dir}/projector_finetune_best_loss.pt")
             np.save(
-                f"{out_dir}validation_target_vals_loss.npy",
+                f"{out_dir}/validation_target_vals_loss.npy",
                 target,
             )
             np.save(
-                f"{out_dir}validation_predicted_vals_loss.npy",
+                f"{out_dir}/validation_predicted_vals_loss.npy",
                 predicted,
             )
         # also save the model if highest val accuracy is achieved
@@ -353,18 +349,14 @@ def main(args):
             print("new highest val accuracy", flush=True, file=logfile)
             acc_val_best = acc_val_all[-1]
             if args.finetune:
-                torch.save(
-                    net.state_dict(), out_dir + "jjepa_finetune_best_acc" + ".pt"
-                )
-            torch.save(
-                proj.state_dict(), out_dir + "projector_finetune_best_acc" + ".pt"
-            )
+                torch.save(net.state_dict(), f"{out_dir}/jjepa_finetune_best_acc.pt")
+            torch.save(proj.state_dict(), f"{out_dir}/projector_finetune_best_acc.pt")
             np.save(
-                f"{out_dir}validation_target_vals_acc.npy",
+                f"{out_dir}/validation_target_vals_acc.npy",
                 target,
             )
             np.save(
-                f"{out_dir}validation_predicted_vals_acc.npy",
+                f"{out_dir}/validation_predicted_vals_acc.npy",
                 predicted,
             )
         # calculate the AUC and imtafe and output to the logfile
@@ -380,32 +372,28 @@ def main(args):
 
             rej_val_best = imtafe
             if args.finetune:
-                torch.save(
-                    net.state_dict(), out_dir + "jjepa_finetune_best_rej" + ".pt"
-                )
-            torch.save(
-                proj.state_dict(), out_dir + "projector_finetune_best_rej" + ".pt"
-            )
+                torch.save(net.state_dict(), f"{out_dir}/jjepa_finetune_best_rej.pt")
+            torch.save(proj.state_dict(), f"{out_dir}/projector_finetune_best_rej.pt")
             np.save(
-                f"{out_dir}validation_target_vals_rej.npy",
+                f"{out_dir}/validation_target_vals_rej.npy",
                 target,
             )
             np.save(
-                f"{out_dir}validation_predicted_vals_rej.npy",
+                f"{out_dir}/validation_predicted_vals_rej.npy",
                 predicted,
             )
 
         # save all losses and accuracies
         np.save(
-            f"{out_dir}loss_train.npy",
+            f"{out_dir}/loss_train.npy",
             np.array(loss_train_all),
         )
         np.save(
-            f"{out_dir}loss_val.npy",
+            f"{out_dir}/loss_val.npy",
             np.array(loss_val_all),
         )
         np.save(
-            f"{out_dir}acc_val.npy",
+            f"{out_dir}/acc_val.npy",
             np.array(acc_val_all),
         )
         te_end = time.time()
