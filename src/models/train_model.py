@@ -230,7 +230,7 @@ def main(rank, world_size, args):
         non_log_files = [file for file in contents if file.endswith(".pth")]
 
         # Check if there are files other than log files
-        if non_log_files:
+        if non_log_files and not args.load_checkpoint:
             sys.exit(
                 "ERROR: experiment already exists and contains files other than log files; don't want to overwrite it by mistake"
             )
