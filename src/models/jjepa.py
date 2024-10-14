@@ -195,10 +195,11 @@ class JetsTransformer(nn.Module):
         x = self.subjet_emb(x)
 
         # pos emb
-        pos_emb = self.calc_pos_emb(subjets_meta)
-        if self.options.debug:
-            print(pos_emb.shape)
-        x += pos_emb
+        if self.options.encoder_pos_emb:
+            pos_emb = self.calc_pos_emb(subjets_meta)
+            if self.options.debug:
+                print(pos_emb.shape)
+            x += pos_emb
 
         # forward prop
         for blk in self.blocks:
