@@ -129,13 +129,20 @@ def main(args):
 
     # check if experiment already exists and is not empty
 
-    if os.path.isdir(out_dir) and os.listdir(out_dir):
-        sys.exit(
-            "ERROR: experiment already exists and is not empty, don't want to overwrite it by mistake"
-        )
-    else:
+    if os.path.isdir(out_dir):
+        # List all items in the directory
+        contents = os.listdir(out_dir)
+
+        # Filter out log files
+        non_log_files = [file for file in contents if file.endswith(".pth")]
+
+        # Check if there are files other than log files
+        if non_log_files:
+            sys.exit(
+                "ERROR: experiment already exists and contains files other than log files; don't want to overwrite it by mistake"
+            )
         # This will create the directory if it does not exist or if it is empty
-        os.makedirs(out_dir, exist_ok=True)
+    os.makedirs(out_dir, exist_ok=True)
 
     # initialise logfile
     args.logfile = f"{out_dir}/logfile.txt"
