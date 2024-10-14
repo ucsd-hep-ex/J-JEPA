@@ -35,6 +35,7 @@ class ParTEncoder(nn.Module):
             scale_heads=True,
             scale_resids=True,
         )
+        self.calc_pos_emb = create_space_pos_emb_fn(embed_dim)
         cfg_block = default_cfg.copy()
         if options.block_params is not None:
             cfg_block.update(options.block_params)
@@ -99,9 +100,17 @@ class ParTEncoder(nn.Module):
         # v: (N, 4, P) [px,py,pz,energy]
         # mask: (N, 1, P) -- real particle = 1, padded = 0
         padding_mask = ~mask.squeeze(1)  # (N, P)
+        pos_emb_input = x.transpose(1, 2)  # (N, P, C)
         with torch.cuda.amp.autocast(enabled=self.options.use_amp):
             # input embedding
-            x = self.embed(x).masked_fill(~mask.permute(2, 0, 1), 0)  # (P, N, C)
+            x = self.embed(x).masked_fill(~mask.permute(2, 0, 1), 0)  # (P, N, emb_dim)
+            if self.options.encoder_pos_emb:
+                pos_emb = self.calc_pos_emb(pos_emb_input).transpose(
+                    0, 1
+                )  # (P, N, emb_dim)
+                print(f"pos_emb shape: {pos_emb.shape}")
+                print(f"x shape: {x.shape}")
+                x += pos_emb
             attn_mask = None
             if (v is not None or uu is not None) and self.pair_embed is not None:
                 attn_mask = self.pair_embed(v, uu).view(

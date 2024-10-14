@@ -196,6 +196,9 @@ class Options(Namespace):
         # depending on where you create the attention block
         self.repr_dim: int = -1
 
+        # Whether to use positional embeddings in the encoder
+        self.encoder_pos_emb: bool = True
+
         # =========================================================================================
         # Optimizer Parameters
         # =========================================================================================
