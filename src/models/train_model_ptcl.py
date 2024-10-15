@@ -375,8 +375,9 @@ def main(rank, world_size, args):
                 p4_spatial,
                 ratio=options.trgt_ratio,
                 max_targets=options.max_targets,
-                device=device,
             )
+            context_masks = context_masks.to(device)
+            target_masks = target_masks.to(device)
 
             def train_step():
                 cov_loss = 0
