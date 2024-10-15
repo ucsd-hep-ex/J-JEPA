@@ -129,8 +129,6 @@ class ParTEncoder(nn.Module):
                 pos_emb = self.calc_pos_emb(pos_emb_input).transpose(
                     0, 1
                 )  # (P, N, emb_dim)
-                print(f"pos_emb shape: {pos_emb.shape}")
-                print(f"x shape: {x.shape}")
                 x += pos_emb
             attn_mask = None
             if (v is not None or uu is not None) and self.pair_embed is not None:
@@ -204,7 +202,6 @@ class ParTEncoder(nn.Module):
                 )
                 x_cls = selected_particles_padded  # (B, max_length, emb_dim)
             if self.fc is None:
-                print(f"encoder output shape: {x_cls.transpose(0, 1).shape}")
                 return x_cls.transpose(0, 1)
             output = self.fc(x_cls).transpose(0, 1)
             return output
@@ -254,7 +251,6 @@ class ParTPredictor(nn.Module):
         pred_emb_input_dim = (
             options.fc_params[-1][0] if options.fc_params else embed_dim
         )
-        print(f"pred_emb_input_dim: {pred_emb_input_dim}")
         self.embed = (
             Embed(
                 pred_emb_input_dim,
@@ -264,8 +260,6 @@ class ParTPredictor(nn.Module):
             if len(self.options.embed_dims) > 0
             else nn.Identity()
         )
-        print("embedding layers of ParTPredictor")
-        print(self.embed)
         self.calc_predictor_pos_emb = create_space_pos_emb_fn(
             options.predictor_embed_dims[-1]
         )
@@ -331,12 +325,8 @@ class ParTPredictor(nn.Module):
         if self.options.debug:
             print(f"ParTPredictor forward pass with input shape: {x.shape}")
 
-        print(f"ParTPredictor embedding with input x shape: {x.shape}")
         x = self.embed(x.transpose(1, 2))
-        print(f"ParTPredictor embedding output shape: {x.shape}")
         pos_emb = self.calc_predictor_pos_emb(context_particle_ftrs)
-        print(f"pos_emb shape: {pos_emb.shape}")
-        print(f"x shape: {x.shape}")
         x += pos_emb
 
         B, N_ctxt, D = x.shape
@@ -344,7 +334,6 @@ class ParTPredictor(nn.Module):
 
         # Prepare position embeddings for target particles
         trgt_pos_emb = self.calc_predictor_pos_emb(target_particle_ftrs)
-        print(f"trgt_pos_emb shape: {trgt_pos_emb.shape}")
         assert trgt_pos_emb.shape[2] == D
 
         # Create prediction tokens
