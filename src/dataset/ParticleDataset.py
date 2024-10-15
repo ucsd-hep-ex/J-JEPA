@@ -87,6 +87,11 @@ class ParticleDataset(Dataset):
             self.p4 = self.p4[:num_jets]
             for key in self.stats:
                 self.stats[key] = self.stats[key][:num_jets]
+        # print(f"p4_spatial shape: {self.p4_spatial.shape}")
+        # print(f"mask shape: {self.mask.shape}")
+        self.p4_spatial = self.p4_spatial.transpose(0, 2, 1) # (num_jets, num_ptcls, 4)
+        self.p4 = self.p4.transpose(0, 2, 1) # (num_jets, num_ptcls, 4)
+        
         if self.return_labels:
             print(
                 "__getitem__ returns",

@@ -363,6 +363,10 @@ def main(rank, world_size, args):
         )
         # ["p4_spatial (px, py, pz, e)", "p4 (eta, phi, log_pt, log_e)", "mask"]
         for itr, (p4_spatial, p4, particle_mask) in enumerate(pbar_t):
+            particle_mask = particle_mask.squeeze(-1).bool()
+            logger.info(f"p4_spatial shape: {p4_spatial.shape}")
+            logger.info(f"p4 shape: {p4.shape}")
+            logger.info(f"particle_mask shape: {particle_mask.shape}")
             p4 = p4.to(dtype=torch.float32)
             p4_spatial = p4_spatial.to(dtype=torch.float32)
             p4 = p4.to(device, non_blocking=True)
@@ -379,6 +383,13 @@ def main(rank, world_size, args):
             context_masks = context_masks.to(device)
             target_masks = target_masks.to(device)
 
+            logger.info(f"shape of context mask before expanding: {context_masks.shape}")
+            context_masks_expanded = context_masks.unsqueeze(-1)  # Shape: [B, N, 1]
+            context_masks_expanded = context_masks_expanded.expand(-1, -1, 4)  # Shape: [B, N, 4]
+            logger.info(f"shape of context mask after expanding: {context_masks_expanded.shape}")
+            target_masks_expanded = target_masks.unsqueeze(-1)  # Shape: [B, N, 1]
+            target_masks_expanded = target_masks_expanded.expand(-1, -1, 4)  # Shape: [B, N, 4]
+
             def train_step():
                 cov_loss = 0
                 var_loss = 0
@@ -388,8 +399,8 @@ def main(rank, world_size, args):
                     B = p4_spatial.shape[0]
                     N_ctxt = context_masks.sum(dim=1).max().item()
                     N_trgt = target_masks.sum(dim=1).max().item()
-                    p4_spatial_context = p4_spatial[context_masks].view(B, N_ctxt, 4)
-                    p4_spatial_target = p4_spatial[target_masks].view(B, N_trgt, 4)
+                    p4_spatial_context = p4_spatial[context_masks_expanded].view(B, N_ctxt, 4)
+                    p4_spatial_target = p4_spatial[target_masks_expanded].view(B, N_trgt, 4)
                     ctxt_particle_mask = particle_mask[context_masks].view(B, N_ctxt)
                     trgt_particle_mask = particle_mask[target_masks].view(B, N_trgt)
 

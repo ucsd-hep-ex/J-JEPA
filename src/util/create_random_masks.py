@@ -120,7 +120,7 @@ def create_random_masks(p4_spatial, ratio, max_targets):
     Creates context and target masks for a batch of jets based on the provided ratio and max_targets.
 
     Parameters:
-    - p4_spatial: Torch tensor of shape (batch_size, 4, total_num_particles_padded) containing px, py, pz,
+    - p4_spatial: Torch tensor of shape (batch_size, total_num_particles_padded, 4) containing px, py, pz,
         and e (energy) of a batch of jets for input into get_subjets(px, py, pz, e, JET_ALGO="CA", jet_radius=0.2)
     - ratio: Float between 0 and 1, specifying the ratio of target particles to total non-padded particles.
     - max_targets: Integer, maximum number of target particles each jet should have.
@@ -129,6 +129,7 @@ def create_random_masks(p4_spatial, ratio, max_targets):
     - context_masks: Torch tensor of shape (batch_size, total_num_particles_padded), with 1s for context particles and 0s elsewhere.
     - target_masks: Torch tensor of shape (batch_size, total_num_particles_padded), with 1s for target particles and 0s elsewhere.
     """
+    p4_spatial = p4_spatial.transpose(1, 2)
     batch_size, _, total_num_particles_padded = p4_spatial.shape
 
     context_masks = torch.zeros(
@@ -163,8 +164,8 @@ def create_random_masks(p4_spatial, ratio, max_targets):
         # Assign to the batch masks
         context_masks[i] = context_mask
         target_masks[i] = target_mask
-
-    return context_masks, target_masks
+    
+    return context_masks.bool(), target_masks.bool()
 
 
 def create_random_masks_single(

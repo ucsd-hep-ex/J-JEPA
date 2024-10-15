@@ -116,6 +116,7 @@ class ParTEncoder(nn.Module):
         pos_emb_input = torch.clone(x)  # (N, P, 4)
         x = x.transpose(1, 2)  # (N, 4, P)
         v = v.transpose(1, 2) if v is not None else None  # (N, 4, P)
+        mask = mask.bool()
         mask = mask.unsqueeze(1) if mask is not None else None  # (N, 1, P)
         split_mask = (
             split_mask.unsqueeze(1) if split_mask is not None else None
