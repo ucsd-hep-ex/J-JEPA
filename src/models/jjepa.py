@@ -11,7 +11,7 @@ from src.options import Options
 from src.util.tensors import trunc_normal_
 from src.util.DimensionCheckLayer import DimensionCheckLayer
 
-from src.models.ParT.ParticleTransformerEncoder import ParTEncoder
+from src.models.ParT.ParticleTransformerEncoder import ParTEncoder, ParTPredictor
 
 # A dictionary for normalization layers
 NORM_LAYERS = {
@@ -342,15 +342,21 @@ class JJEPA(nn.Module):
         if self.options.debug:
             print("Initializing JJEPA module")
         self.use_predictor = options.use_predictor
-        self.use_parT_encoder = options.use_parT_encoder
-        self.context_transformer = JetsTransformer(options)
-        if self.use_parT_encoder:
-            self.context_transformer = ParTEncoder(options)
+        self.use_parT = options.use_parT
+        print("options is None:", options is None)
+
+        if self.use_parT:
+            self.context_transformer = ParTEncoder(options=options)
+        else:
+            self.context_transformer = JetsTransformer(options)
         self.target_transformer = copy.deepcopy(self.context_transformer)
         for param in self.target_transformer.parameters():
             param.requires_grad = False
         if self.use_predictor:
-            self.predictor_transformer = JetsTransformerPredictor(options)
+            if self.use_parT:
+                self.predictor_transformer = ParTPredictor(options=options)
+            else:
+                self.predictor_transformer = JetsTransformerPredictor(options)
 
         # Debug Statement
         if self.options.debug:
@@ -360,46 +366,53 @@ class JJEPA(nn.Module):
 
     """
     context = {
-        subjets: torch.Tensor,
-        particle_mask: torch.Tensor,
-        subjet_mask: torch.Tensor,
-        split_mask: torch.Tensor,
+        p4_spatial: torch.Tensor of shape [B, N_ctxt, 4],
+        particle_mask: torch.Tensor of shape [B, N_ctxt],
+        split_mask: torch.Tensor of shape [B, N_ctxt],
     }
     target = {
-        subjets: torch.Tensor,
-        particle_mask: torch.Tensor,
-        subjet_mask: torch.Tensor,
-        split_mask: torch.Tensor,
+        p4_spatial: torch.Tensor of shape [B, N_trgt, 4],
+        particle_mask: torch.Tensor of shape [B, N_trgt],
+        split_mask: torch.Tensor of shape [B, N_trgt],
     }
     full_jet = {
-        particles: torch.Tensor,
-        particle_mask: torch.Tensor,
-        subjet_mask: torch.Tensor,
+        p4: torch.Tensor of shape [B, N, 4],
+        p4_spatial: torch.Tensor of shape [B, N, 4],
+        particle_mask: torch.Tensor of shape [B, N],
     }
     """
 
     def forward(self, context, target, full_jet):
         if self.options.debug:
             print(f"JJEPA forward pass")
-        context_repr = self.context_transformer(
-            full_jet,
-            full_jet["subjet_mask"],
-            full_jet["subjets"],
-            context["split_mask"],
-        )
+        if self.options.use_parT:
+            context_repr = self.context_transformer(
+                full_jet["p4"],
+                full_jet["p4_spatial"],
+                full_jet["particle_mask"],
+                context["split_mask"],
+            )
+        else:
+            context_repr = self.context_transformer(
+                full_jet["p4"], full_jet["particle_mask"], context["split_mask"]
+            )
+
         # Debug Statement
         if self.options.debug:
             context_repr = self.context_check(context_repr)
         target_repr = self.target_transformer(
-            full_jet, full_jet["subjet_mask"], full_jet["subjets"], target["split_mask"]
+            full_jet["p4"],
+            full_jet["p4_spatial"],
+            full_jet["particle_mask"],
+            target["split_mask"],
         )
         if self.use_predictor:
-            # TODO: update the input to the model x, subjet_mask, target_subjet_ftrs, context_subjet_ftrs):
             pred_repr = self.predictor_transformer(
                 context_repr,
-                context["subjet_mask"],
-                target["subjets"],
-                context["subjets"],
+                context["particle_mask"],
+                target["particle_mask"],
+                target["p4_spatial"],
+                context["p4_spatial"],
             )
             if self.options.debug:
                 pred_repr = self.predictor_check(pred_repr)

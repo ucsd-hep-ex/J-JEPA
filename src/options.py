@@ -31,7 +31,7 @@ class Options(Namespace):
         # =========================================================================================
 
         # Whether to use the particle transformer encoder
-        self.use_parT_encoder: bool = False
+        self.use_parT: bool = False
 
         # Use predictor
         self.use_predictor: bool = True
@@ -53,7 +53,7 @@ class Options(Namespace):
         # later embedding layers
         # embedding dimension size
         self.emb_dim: int = 1024
-        self.predictor_emb_dim = 512
+        self.predictor_emb_dim: int = 512
 
         # whether to add skip connections to the later embedding layers
         self.embedding_skip_connections: bool = True
@@ -142,6 +142,9 @@ class Options(Namespace):
         # Format: [(out_dim, drop_rate) for layer in range(num_layers)]
         self.fc_params: list = None
 
+        # number of target particles in a jet
+        self.N_trgt: int = 30
+
         # parameters for class attention blocks (used for aggregating ptcl features into jet features)
         self.cls_block_params: dict = {
             "dropout": 0,
@@ -163,6 +166,9 @@ class Options(Namespace):
 
         # embedding dimensions for the transformer layers
         self.embed_dims = [128, 512, 128]
+
+        # embedding dimensions for the predictor
+        self.predictor_embed_dims = [64, 64, 64]
 
         # input dim for particles (default 4: deta, dphi, pt_log, e_log)
         self.input_dim: int = 4
@@ -369,12 +375,14 @@ class Options(Namespace):
     def update(self, filepath: str):
         with open(filepath, "r") as json_file:
             self.update_options(json.load(json_file))
+        self.embed_dims[-1] = self.emb_dim
 
     @classmethod
     def load(cls, filepath: str):
         options = cls()
         with open(filepath, "r") as json_file:
             options.update_options(json.load(json_file))
+            options.embed_dims[-1] = options.emb_dim
         return options
 
     def save(self, filepath: str):

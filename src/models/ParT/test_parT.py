@@ -20,14 +20,28 @@ if __name__ == "__main__":
 
     ctxt_mask_shape = (batch_size, 1, N_ctxt)
     ctxt_particle_mask = torch.rand(ctxt_mask_shape) > 0.5
+
+    trgt_mask_shape = (batch_size, 1, N_trgt)
+    trgt_particle_mask = torch.rand(trgt_mask_shape) > 0.5
+
     encoded_features = encoder(x, v, ctxt_particle_mask)
+    print(f"Encoded features shape: {encoded_features.shape}")
+
+    # test split_mask
+    x = v = torch.rand((batch_size, 4, N_ctxt + N_trgt))
+    full_mask_shape = (batch_size, 1, N_ctxt + N_trgt)
+    full_particle_mask = torch.rand(full_mask_shape) > 0.5
+    split_mask = torch.cat(
+        (torch.ones((batch_size, N_ctxt)), torch.zeros((batch_size, N_trgt))), dim=-1
+    )
+    print(f"Split mask shape: {split_mask.shape}")
+    encoded_features = encoder(x, v, full_particle_mask, split_mask)
     print(f"Encoded features shape: {encoded_features.shape}")
 
     # test ParTPredictor
     predictor = ParTPredictor(options=options)
     print("predictor", predictor)
-    trgt_mask_shape = (batch_size, 1, N_trgt)
-    trgt_particle_mask = torch.rand(trgt_mask_shape) > 0.5
+
     target_particle_features = torch.rand((batch_size, N_trgt, 4))
     context_features = torch.rand((batch_size, N_ctxt, 4))
     output = predictor(

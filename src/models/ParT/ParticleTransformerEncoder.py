@@ -19,17 +19,19 @@ class ParTEncoder(nn.Module):
         self.options = options
         self.aggregate_ptcl_features = aggregate_ptcl_features
         embed_dim = (
-            options.embed_dims[-1] if len(options.embed_dims) > 0 else options.input_dim
+            self.options.embed_dims[-1]
+            if len(self.options.embed_dims) > 0
+            else self.options.input_dim
         )
         default_cfg = dict(
             embed_dim=embed_dim,
-            num_heads=options.num_heads,
+            num_heads=self.options.num_heads,
             ffn_ratio=4,
             dropout=0.1,
             attn_dropout=0.1,
             activation_dropout=0.1,
             add_bias_kv=False,
-            activation=options.activation,
+            activation=self.options.activation,
             scale_fc=True,
             scale_attn=True,
             scale_heads=True,
@@ -37,45 +39,50 @@ class ParTEncoder(nn.Module):
         )
         self.calc_pos_emb = create_space_pos_emb_fn(embed_dim)
         cfg_block = default_cfg.copy()
-        if options.block_params is not None:
-            cfg_block.update(options.block_params)
+        if self.options.block_params is not None:
+            cfg_block.update(self.options.block_params)
 
         cfg_cls_block = copy.deepcopy(default_cfg)
-        if options.cls_block_params is not None:
-            cfg_cls_block.update(options.cls_block_params)
+        if self.options.cls_block_params is not None:
+            cfg_cls_block.update(self.options.cls_block_params)
 
         self.embed = (
-            Embed(options.input_dim, options.embed_dims, activation=options.activation)
-            if len(options.embed_dims) > 0
+            Embed(
+                self.options.input_dim,
+                self.options.embed_dims,
+                activation=self.options.activation,
+            )
+            if len(self.options.embed_dims) > 0
             else nn.Identity()
         )
         self.pair_embed = (
             PairEmbed(
-                options.pair_input_dim,
+                self.options.pair_input_dim,
                 0,
-                options.pair_embed_dims + [cfg_block["num_heads"]],
+                self.options.pair_embed_dims + [cfg_block["num_heads"]],
                 remove_self_pair=True,
                 use_pre_activation_pair=True,
                 for_onnx=for_inference,
             )
-            if options.pair_embed_dims is not None and options.pair_input_dim > 0
+            if self.options.pair_embed_dims is not None
+            and self.options.pair_input_dim > 0
             else None
         )
         self.blocks = nn.ModuleList(
-            [Block(**cfg_block) for _ in range(options.num_layers)]
+            [Block(**cfg_block) for _ in range(self.options.num_layers)]
         )
         self.cls_blocks = (
             nn.ModuleList(
-                [Block(**cfg_cls_block) for _ in range(options.num_cls_layers)]
+                [Block(**cfg_cls_block) for _ in range(self.options.num_cls_layers)]
             )
-            if options.num_cls_layers > 0
+            if self.options.num_cls_layers > 0
             else None
         )
         self.norm = nn.LayerNorm(embed_dim)
-        if options.fc_params is not None:
+        if self.options.fc_params is not None:
             fcs = []
             in_dim = embed_dim
-            for out_dim, drop_rate in options.fc_params:
+            for out_dim, drop_rate in self.options.fc_params:
                 fcs.append(
                     nn.Sequential(
                         nn.Linear(in_dim, out_dim), nn.ReLU(), nn.Dropout(drop_rate)
@@ -95,12 +102,26 @@ class ParTEncoder(nn.Module):
             "cls_token",
         }
 
-    def forward(self, x, v=None, mask=None, uu=None):
+    def forward(self, x, v=None, mask=None, split_mask=None, uu=None):
+        # new shapes:
+        # x: (N, P, 4) [eta, phi, log_pt, log_energy]
+        # v: (N, P, 4) [px,py,pz,energy]
+        # mask: (N, P) -- real particle = 1, padded = 0
+        # split_mask: (N, P) -- keep in output = 1, ignore in output = 0
+        # old shapes:
         # x: (N, C, P)
         # v: (N, 4, P) [px,py,pz,energy]
         # mask: (N, 1, P) -- real particle = 1, padded = 0
+        # split_mask: (N, 1, P) -- keep in output = 1, ignore in output = 0
+        pos_emb_input = torch.clone(x)  # (N, P, 4)
+        x = x.transpose(1, 2)  # (N, 4, P)
+        v = v.transpose(1, 2) if v is not None else None  # (N, 4, P)
+        mask = mask.unsqueeze(1) if mask is not None else None  # (N, 1, P)
+        split_mask = (
+            split_mask.unsqueeze(1) if split_mask is not None else None
+        )  # (N, 1, P)
+
         padding_mask = ~mask.squeeze(1)  # (N, P)
-        pos_emb_input = x.transpose(1, 2)  # (N, P, C)
         with torch.cuda.amp.autocast(enabled=self.options.use_amp):
             # input embedding
             x = self.embed(x).masked_fill(~mask.permute(2, 0, 1), 0)  # (P, N, emb_dim)
@@ -132,10 +153,61 @@ class ParTEncoder(nn.Module):
                 else:
                     x = x.sum(dim=0)
                     x_cls = self.norm(x)  # (batch_size, embed_dim)
+
+            # apply split mask
+            # print("x_cls shape:", x_cls.shape)
+            x_cls = x_cls.transpose(0, 1)  # (N, P, emb_dim)
+            if split_mask is not None:
+                split_mask = split_mask.bool()
+                # 'output' is the output tensor of shape (batch_size, N, emb_dim)
+                # 'split_mask' is the mask tensor of shape (batch_size, N)
+
+                # Example tensors
+                B, N, emb_dim = (
+                    x_cls.shape
+                )  # Batch size, sequence length, embedding dimension
+
+                # Step 1: Find indices where 'split_mask' is True
+                indices = split_mask.nonzero(as_tuple=False)  # Shape: (num_selected, 2)
+                batch_indices = indices[:, 0]  # Batch indices
+                seq_indices = indices[:, 1]  # Sequence indices
+
+                # Step 2: Gather selected particles
+                selected_particles = x_cls[
+                    batch_indices, seq_indices, :
+                ]  # Shape: (num_selected, emb_dim)
+
+                # Step 3: Compute the number of selected particles per batch
+                lengths = (
+                    split_mask.squeeze(dim=1).sum(dim=1).to(torch.long)
+                )  # Shape: (B,)
+
+                # Step 4: Compute cumulative lengths and positions within each batch
+                cum_lengths = torch.cat(
+                    [torch.tensor([0], device=lengths.device), lengths.cumsum(0)[:-1]]
+                )
+                positions_in_batch = torch.arange(
+                    lengths.sum(), device=lengths.device
+                ) - torch.repeat_interleave(cum_lengths, lengths)
+
+                # Step 5: Determine the maximum number of selections
+                max_length = lengths.max().item()
+
+                # Step 6: Initialize a padded tensor
+                selected_particles_padded = torch.zeros(
+                    B, max_length, emb_dim, device=x_cls.device, dtype=x_cls.dtype
+                )
+
+                # Step 7: Assign selected particles to the padded tensor
+                selected_particles_padded[batch_indices, positions_in_batch] = (
+                    selected_particles
+                )
+                x_cls = selected_particles_padded  # (B, max_length, emb_dim)
             if self.fc is None:
+                print(f"encoder output shape: {x_cls.transpose(0, 1).shape}")
                 return x_cls.transpose(0, 1)
-            output = self.fc(x_cls)
-            return output.transpose(0, 1)  # (batch_size, num_ptcls, embed_dim)
+            output = self.fc(x_cls).transpose(0, 1)
+            return output
 
 
 """
@@ -158,10 +230,10 @@ class ParTPredictor(nn.Module):
     ):
         super().__init__()
         self.options = options
-        embed_dim = options.predictor_emb_dim
+        embed_dim = options.embed_dims[-1]
 
         default_cfg = dict(
-            embed_dim=embed_dim,
+            embed_dim=options.predictor_embed_dims[-1],
             num_heads=options.num_heads,
             ffn_ratio=4,
             dropout=options.dropout,
@@ -179,10 +251,24 @@ class ParTPredictor(nn.Module):
             cfg_block.update(options.block_params)
 
         # Embedding layers
-        self.embed = create_predictor_embedding_layers(
-            options, input_dim=options.predictor_emb_dim
+        pred_emb_input_dim = (
+            options.fc_params[-1][0] if options.fc_params else embed_dim
         )
-        self.calc_predictor_pos_emb = create_space_pos_emb_fn(options.predictor_emb_dim)
+        print(f"pred_emb_input_dim: {pred_emb_input_dim}")
+        self.embed = (
+            Embed(
+                pred_emb_input_dim,
+                self.options.predictor_embed_dims,
+                activation=self.options.activation,
+            )
+            if len(self.options.embed_dims) > 0
+            else nn.Identity()
+        )
+        print("embedding layers of ParTPredictor")
+        print(self.embed)
+        self.calc_predictor_pos_emb = create_space_pos_emb_fn(
+            options.predictor_embed_dims[-1]
+        )
 
         # Transformer blocks
         self.blocks = nn.ModuleList(
@@ -190,14 +276,16 @@ class ParTPredictor(nn.Module):
         )
 
         # Normalization and projection layers
-        self.norm = nn.LayerNorm(embed_dim)
+        self.norm = nn.LayerNorm(options.predictor_embed_dims[-1])
         self.predictor_proj = nn.Linear(
-            options.predictor_emb_dim, options.emb_dim, bias=True
+            options.predictor_embed_dims[-1], options.emb_dim, bias=True
         )
 
         # Mask token initialization
         self.init_std = options.init_std
-        self.mask_token = nn.Parameter(torch.zeros(1, 1, embed_dim), requires_grad=True)
+        self.mask_token = nn.Parameter(
+            torch.zeros(1, 1, options.predictor_embed_dims[-1]), requires_grad=True
+        )
         trunc_normal_(self.mask_token, std=self.init_std)
 
     @torch.jit.ignore
@@ -215,33 +303,48 @@ class ParTPredictor(nn.Module):
         context_particle_ftrs,
     ):
         """
-        Inputs:
+        new inputs:
+            x: (B, N_ctxt, 4) [eta, phi, log_pt, log_energy]
+            ctxt_particle_mask: (B,  N_ctxt) -- real particle = 1, padded = 0
+            trgt_particle_mask: (B,  N_trgt) -- real particle = 1, padded = 0
+            target_particle_ftrs: (B, N_trgt, 4) [eta, phi, log_pt, log_energy]
+            context_particle_ftrs: (B, N_ctxt, 4) [eta, phi, log_pt, log_energy]
+
+        Old Inputs:
             x: context particle representations
                 shape: [B, N_ctxt, emb_dim]
             ctxt_particle_mask: mask for zero-padded context particles
                 shape: [B, 1, N_ctxt]
             trgt_particle_mask: mask for zero-padded target particles
                 shape: [B, 1, N_trgt]
-            target_particle_ftrs: target particle 4-vector (px, py, pz, e)
+            target_particle_ftrs: target particle 4-vector [eta, phi, log_pt, log_energy]
                 shape: [B, N_trgt, 4]
-            context_particle_ftrs: context particle 4-vector (px, py, pz, e)
+            context_particle_ftrs: context particle 4-vector [eta, phi, log_pt, log_energy]
                 shape: [B, N_ctxt, 4]
         Output:
             predicted target particle representations
                 shape: [B, N_trgt, predictor_output_dim]
         """
+        # unsqueeze the masks
+        ctxt_particle_mask = ctxt_particle_mask.unsqueeze(1)  # (B, 1, N_ctxt)
+        trgt_particle_mask = trgt_particle_mask.unsqueeze(1)  # (B, 1, N_trgt)
         if self.options.debug:
             print(f"ParTPredictor forward pass with input shape: {x.shape}")
 
-        # Apply embedding to context particles
-        x = self.embed(x)
-        x += self.calc_predictor_pos_emb(context_particle_ftrs)
+        print(f"ParTPredictor embedding with input x shape: {x.shape}")
+        x = self.embed(x.transpose(1, 2))
+        print(f"ParTPredictor embedding output shape: {x.shape}")
+        pos_emb = self.calc_predictor_pos_emb(context_particle_ftrs)
+        print(f"pos_emb shape: {pos_emb.shape}")
+        print(f"x shape: {x.shape}")
+        x += pos_emb
 
         B, N_ctxt, D = x.shape
         _, N_trgt, _ = target_particle_ftrs.shape
 
         # Prepare position embeddings for target particles
         trgt_pos_emb = self.calc_predictor_pos_emb(target_particle_ftrs)
+        print(f"trgt_pos_emb shape: {trgt_pos_emb.shape}")
         assert trgt_pos_emb.shape[2] == D
 
         # Create prediction tokens
@@ -267,6 +370,7 @@ class ParTPredictor(nn.Module):
         )
 
         # Expand target particle masks
+        trgt_particle_mask = trgt_particle_mask.contiguous()
         trgt_particle_mask_expanded = trgt_particle_mask.view(B * N_trgt, 1)
 
         # Combine masks
