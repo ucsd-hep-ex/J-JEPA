@@ -145,6 +145,7 @@ def get_perf_stats(labels, measures):
 def main(args):
     t0 = time.time()
     # set up results directory
+    
     options = Options.load(args.option_file)
     args.output_dim = options.emb_dim
 
@@ -228,7 +229,9 @@ def main(args):
         net = model.target_transformer
 
     # initialize the MLP projector
-    finetune_mlp_dim = args.output_dim if not args.finetune_mlp else 20 * 30 * 4
+    if args.from_input:
+        args.output_dim = 20 * 30 * 4
+    finetune_mlp_dim = args.output_dim
     if args.finetune_mlp:
         finetune_mlp_dim = f"{args.output_dim}-{args.finetune_mlp}"
     proj = Projector(2, finetune_mlp_dim).to(args.device)
