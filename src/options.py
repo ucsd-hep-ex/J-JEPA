@@ -39,7 +39,7 @@ class Options(Namespace):
         # =========================================================================================
 
         # Whether to use the particle transformer encoder
-        self.use_parT: bool = False
+        self.use_parT: bool = True
 
         # Use predictor
         self.use_predictor: bool = True
