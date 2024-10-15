@@ -255,8 +255,18 @@ def main(rank, world_size, args):
 
     model = JJEPA(options).to(device)
     model = model.to(dtype=torch.float32)
+    # checkpoint = {
+    #     "model": model.state_dict(),
+    #     "optimizer": optimizer.state_dict(),
+    #     "epoch": epoch,
+    #     "training loss": loss_train,
+    #     "validation loss": loss_val,
+    # }
+    checkpoint = {}
     if args.load_checkpoint and Path(args.load_checkpoint).is_file():
-        model.load_state_dict(torch.load(args.load_checkpoint, map_location=device))
+        checkpoint = torch.load(args.load_checkpoint, map_location=device)
+        model.load_state_dict(checkpoint["model"])
+        logger.info(f"Loaded model from {args.load_checkpoint}")
     if world_size > 1:
         model = DistributedDataParallel(model, device_ids=[rank])
 
@@ -316,6 +326,9 @@ def main(rank, world_size, args):
         weight_decay=options.weight_decay,
         eps=options.eps,
     )
+    if checkpoint:
+        optimizer.load_state_dict(checkpoint["optimizer"])
+        logger.info(f"Loaded optimizer state from {args.load_checkpoint}")
     # optimizer = optim.AdamW(
     #     model.parameters(), lr=options.lr, weight_decay=options.weight_decay
     # )
