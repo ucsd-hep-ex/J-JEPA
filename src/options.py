@@ -12,6 +12,14 @@ class Options(Namespace):
         testing_file: str = "",
     ):
         super(Options, self).__init__()
+        # =========================================================================================
+        # Particle training specific parameters
+        # =========================================================================================
+        # percentage of particles to use as target
+        self.trgt_ratio: float = 0.3
+
+        # maximum number of targets per jet
+        self.max_targets: int = 21
 
         # =========================================================================================
         # Dataset Structure
@@ -300,7 +308,7 @@ class Options(Namespace):
         self.base_momentum: float = 0.99
 
         # max grad norm
-        self.max_grad_norm: float = 0.1
+        self.max_grad_norm: float = 0.0
 
         # number of steps per epoch
         self.num_steps_per_epoch: int = None
