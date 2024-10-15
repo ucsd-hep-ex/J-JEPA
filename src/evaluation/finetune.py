@@ -63,7 +63,11 @@ def load_data(dataset_path, tag=None):
 def load_model(options, model_path=None, device="cpu"):
     model = JJEPA(options).to(device)
     if model_path:
-        model.load_state_dict(torch.load(model_path, map_location=device))
+        saved_state_dict = torch.load(model_path, map_location=device)
+        print("Saved model keys:", saved_state_dict.keys())
+        print("Current model keys:", model.state_dict().keys())
+        model.load_state_dict(saved_state_dict)
+
     print(model)
     return model
 
