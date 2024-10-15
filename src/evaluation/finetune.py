@@ -60,13 +60,36 @@ def load_data(dataset_path, tag=None):
     return dataloader
 
 
+def adjust_state_dict(saved_state_dict):
+    adjusted_state_dict = {}
+    for k, v in saved_state_dict.items():
+        # Map 'attn.proj' to 'attn.multihead_attn.out_proj'
+        if "attn.proj.weight" in k:
+            new_key = k.replace(
+                "attn.proj.weight", "attn.multihead_attn.out_proj.weight"
+            )
+        elif "attn.proj.bias" in k:
+            new_key = k.replace("attn.proj.bias", "attn.multihead_attn.out_proj.bias")
+        else:
+            new_key = k
+        adjusted_state_dict[new_key] = v
+    return adjusted_state_dict
+
+
 def load_model(options, model_path=None, device="cpu"):
     model = JJEPA(options).to(device)
     if model_path:
+        # Load the saved state_dict
         saved_state_dict = torch.load(model_path, map_location=device)
-        print("Saved model keys:", saved_state_dict.keys())
+
+        # Adjust the keys
+        adjusted_state_dict = adjust_state_dict(saved_state_dict)
+
+        print("Saved model keys:", adjusted_state_dict.keys())
         print("Current model keys:", model.state_dict().keys())
-        model.load_state_dict(saved_state_dict)
+
+        # Load the adjusted state_dict into the model
+        model.load_state_dict(adjusted_state_dict)
 
     print(model)
     return model
