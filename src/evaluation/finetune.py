@@ -181,10 +181,13 @@ def main(args):
         print("aggregation method: sum", file=logfile, flush=True)
     else:
         raise ValueError("No aggregation method specified")
-    if args.finetune:
-        print("finetuning (jjepa weights not frozen)", file=logfile, flush=True)
+    if not args.from_input:
+        if args.finetune:
+            print("finetuning (jjepa weights not frozen)", file=logfile, flush=True)
+        else:
+            print("lct (jjepa weights frozen)", file=logfile, flush=True)
     else:
-        print("lct (jjepa weights frozen)", file=logfile, flush=True)
+        print("lct from input features", file=logfile, flush=True)
 
     # define the global base device
     world_size = torch.cuda.device_count()
@@ -220,23 +223,30 @@ def main(args):
     )
 
     # initialise the network
-    model = load_model(options, args.load_jjepa_path, args.device)
-    net = model.target_transformer
+    if not args.from_input:
+        model = load_model(options, args.load_jjepa_path, args.device)
+        net = model.target_transformer
 
     # initialize the MLP projector
-    finetune_mlp_dim = args.output_dim
+    finetune_mlp_dim = args.output_dim if not args.finetune_mlp else 20 * 30 * 4
     if args.finetune_mlp:
         finetune_mlp_dim = f"{args.output_dim}-{args.finetune_mlp}"
     proj = Projector(2, finetune_mlp_dim).to(args.device)
     print(f"finetune mlp: {proj}", flush=True, file=logfile)
-    if args.finetune:
-        optimizer = optim.Adam(
-            [{"params": proj.parameters()}, {"params": net.parameters(), "lr": 1e-6}],
-            lr=1e-4,
-        )
-        net.train()
+    if not args.from_input:
+        if args.finetune:
+            optimizer = optim.Adam(
+                [
+                    {"params": proj.parameters()},
+                    {"params": net.parameters(), "lr": 1e-6},
+                ],
+                lr=1e-4,
+            )
+            net.train()
+        else:
+            net.eval()
+            optimizer = optim.Adam(proj.parameters(), lr=1e-4)
     else:
-        net.eval()
         optimizer = optim.Adam(proj.parameters(), lr=1e-4)
 
     loss = nn.CrossEntropyLoss(reduction="mean")
@@ -272,19 +282,22 @@ def main(args):
             y = labels.to(args.device)
             x = x.view(x.shape[0], x.shape[1], -1)
             x = x.to(args.device)
-            batch = {"particles": x.to(torch.float32)}
-            reps = net(
-                batch,
-                subjet_mask.to(args.device),
-                subjets_meta=subjets.to(args.device),
-                split_mask=None,
-            )
-            if args.flatten:
-                reps = reps.view(reps.shape[0], -1)
-            elif args.sum:
-                reps = reps.sum(dim=1)
+            if not args.from_input:
+                batch = {"particles": x.to(torch.float32)}
+                reps = net(
+                    batch,
+                    subjet_mask.to(args.device),
+                    subjets_meta=subjets.to(args.device),
+                    split_mask=None,
+                )
+                if args.flatten:
+                    reps = reps.view(reps.shape[0], -1)
+                elif args.sum:
+                    reps = reps.sum(dim=1)
+                else:
+                    raise ValueError("No aggregation method specified")
             else:
-                raise ValueError("No aggregation method specified")
+                reps = x.view(x.shape[0], -1)  # flatten the input features
             out = proj(reps)
             batch_loss = loss(out, y.long()).to(args.device)
             batch_loss.backward()
@@ -307,19 +320,22 @@ def main(args):
                 y = labels.to(args.device)
                 x = x.view(x.shape[0], x.shape[1], -1)
                 x = x.to(args.device)
-                batch = {"particles": x.to(torch.float32)}
-                reps = net(
-                    batch,
-                    subjet_mask.to(args.device),
-                    subjets_meta=subjets.to(args.device),
-                    split_mask=None,
-                )
-                if args.flatten:
-                    reps = reps.view(reps.shape[0], -1)
-                elif args.sum:
-                    reps = reps.sum(dim=1)
+                if not args.from_input:
+                    batch = {"particles": x.to(torch.float32)}
+                    reps = net(
+                        batch,
+                        subjet_mask.to(args.device),
+                        subjets_meta=subjets.to(args.device),
+                        split_mask=None,
+                    )
+                    if args.flatten:
+                        reps = reps.view(reps.shape[0], -1)
+                    elif args.sum:
+                        reps = reps.sum(dim=1)
+                    else:
+                        raise ValueError("No aggregation method specified")
                 else:
-                    raise ValueError("No aggregation method specified")
+                    reps = x.view(x.shape[0], -1)
                 out = proj(reps)
                 batch_loss = loss(out, y.long()).detach().cpu().item()
                 losses_e_val.append(batch_loss)
@@ -473,6 +489,12 @@ if __name__ == "__main__":
         type=int,
         action="store",
         help="keep the transformer frozen and only train the MLP head",
+    )
+    parser.add_argument(
+        "--from-input",
+        type=int,
+        action="store",
+        help="do LCT with input features",
     )
     parser.add_argument(
         "--train-dataset-path",
