@@ -233,6 +233,9 @@ class JetsTransformerPredictor(nn.Module):
         self.predictor_embed = create_predictor_embedding_layers(
             options, input_dim=options.emb_dim
         )
+        self.calc_predictor_pos_emb = create_pos_emb_fn(
+            options, options.predictor_emb_dim
+        )
         options.repr_dim = options.predictor_emb_dim
         options.attn_dim = options.repr_dim
         options.in_features = options.repr_dim
@@ -257,7 +260,7 @@ class JetsTransformerPredictor(nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
-    def forward(self, context_repr, context_mask, target_mask):
+    def forward(self, context_repr, context_mask, target_mask, context_p4=None, target_p4=None):
         if self.options.debug:
             print(f"JetsTransformerPredictor forward pass")
             print(f"  context_repr shape: {context_repr.shape}")
@@ -274,6 +277,12 @@ class JetsTransformerPredictor(nn.Module):
 
         # Concatenate context representations and prediction tokens
         x = torch.cat([x, pred_token], dim=1)
+
+        # Add positional embeddings
+        if context_p4 is not None and target_p4 is not None:
+            full_p4 = torch.cat([context_p4, target_p4], dim=1)
+            pos_emb = self.calc_predictor_pos_emb(full_p4)
+            x = x + pos_emb
 
         # Create full particle mask
         full_mask = torch.cat([context_mask, target_mask], dim=1)
@@ -327,6 +336,11 @@ class JJEPA(nn.Module):
             else:
                 self.predictor_transformer = JetsTransformerPredictor(options)
 
+        if self.options.debug:
+            self.input_check = DimensionCheckLayer("Model Input", 3)
+            self.context_check = DimensionCheckLayer("After Context Transformer", 3)
+            self.predictor_check = DimensionCheckLayer("After Predictor", 3)
+
     def forward(self, context, target, full_jet):
         if self.options.debug:
             print(f"JJEPA forward pass")
@@ -359,6 +373,7 @@ class JJEPA(nn.Module):
                 target["particle_mask"]
             )
             if self.options.debug:
+                pred_repr = self.predictor_check(pred_repr)
                 print(f"Predictor output shape: {pred_repr.shape}")
         else:
             pred_repr = None
