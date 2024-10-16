@@ -7,7 +7,6 @@ from .utils import pairwise_lv_fts
 class Embed(nn.Module):
     def __init__(self, input_dim, dims, normalize_input=True, activation="gelu"):
         super().__init__()
-
         self.input_bn = nn.LayerNorm(input_dim) if normalize_input else None
         module_list = []
         for dim in dims:

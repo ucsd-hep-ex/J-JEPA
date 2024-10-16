@@ -24,6 +24,12 @@ class Options(Namespace):
         # =========================================================================================
         # Dataset Structure
         # =========================================================================================
+        # Top level of the .h5 dataset is jet
+        # number of subjets per jet
+        self.num_subjets: int = 20
+
+        # number of particles per jet
+        self.num_particles: int = 30
 
         # number of particle features per particle
         self.num_part_ftr: int = 4

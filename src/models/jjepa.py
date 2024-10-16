@@ -404,7 +404,6 @@ class JJEPA(nn.Module):
             full_jet["particle_mask"],
             target["split_mask"],
         )
-        print(f"JJEPA output - target_repr shape: {target_repr.shape}")
         if self.use_predictor:
             pred_repr = self.predictor_transformer(
                 context_repr,
