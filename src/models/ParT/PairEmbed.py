@@ -8,7 +8,7 @@ class Embed(nn.Module):
     def __init__(self, input_dim, dims, normalize_input=True, activation="gelu"):
         super().__init__()
 
-        self.input_bn = nn.BatchNorm1d(input_dim) if normalize_input else None
+        self.input_bn = nn.LayerNorm(input_dim) if normalize_input else None
         module_list = []
         for dim in dims:
             module_list.extend(
@@ -25,7 +25,8 @@ class Embed(nn.Module):
         if self.input_bn is not None:
             # x: (batch, embed_dim, seq_len)
             x = self.input_bn(x)
-            x = x.permute(2, 0, 1).contiguous()
+            # x = x.permute(2, 0, 1).contiguous()
+            x = x.contiguous()
         # x: (seq_len, batch, embed_dim)
         return self.embed(x)
 

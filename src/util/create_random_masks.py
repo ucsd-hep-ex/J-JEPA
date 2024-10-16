@@ -8,7 +8,7 @@ import fastjet
 import vector
 
 
-def get_subjets(px, py, pz, e, JET_ALGO="CA", jet_radius=0.2):
+def get_subjets(px, py, pz, e, JET_ALGO="CA", jet_radius=0.2, sorted=True):
     """
     Clusters particles into subjets using the specified jet clustering algorithm and jet radius,
     then returns information about the subjets sorted by their transverse momentum (pT) in descending order.
@@ -107,15 +107,17 @@ def get_subjets(px, py, pz, e, JET_ALGO="CA", jet_radius=0.2):
         subjets_info.append(subjet_dict)
 
     # subjets_info now contains the required dictionaries for each subjet
-    subjets_info_sorted = sorted(
-        subjets_info, key=lambda x: x["features"]["pT"], reverse=True
-    )
+    subjets_info_sorted = subjets_info
+    if sorted:
+        subjets_info_sorted = sorted(
+            subjets_info, key=lambda x: x["features"]["pT"], reverse=True
+        )
 
     # subjets_info_sorted now contains the subjets sorted by pT in descending order
     return subjets_info_sorted
 
 
-def create_random_masks(p4_spatial, ratio, max_targets):
+def create_random_masks(p4_spatial, ratio, max_targets, sorted=True):
     """
     Creates context and target masks for a batch of jets based on the provided ratio and max_targets.
 
@@ -150,7 +152,9 @@ def create_random_masks(p4_spatial, ratio, max_targets):
         N_non_padded = torch.count_nonzero(e)
 
         # Call get_subjets
-        subjets_info_sorted = get_subjets(px, py, pz, e, JET_ALGO="CA", jet_radius=0.2)
+        subjets_info_sorted = get_subjets(
+            px, py, pz, e, JET_ALGO="CA", jet_radius=0.2, sorted=sorted
+        )
 
         # Create masks for this jet
         context_mask, target_mask = create_random_masks_single(
@@ -164,7 +168,7 @@ def create_random_masks(p4_spatial, ratio, max_targets):
         # Assign to the batch masks
         context_masks[i] = context_mask
         target_masks[i] = target_mask
-    
+
     return context_masks.bool(), target_masks.bool()
 
 

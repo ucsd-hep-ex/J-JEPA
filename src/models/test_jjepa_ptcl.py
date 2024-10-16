@@ -7,11 +7,12 @@ from src.options import Options
 
 if __name__ == "__main__":
     options = Options()
-    batch_size = 16
-    N_ctxt = 50
-    N_trgt = 30
+    batch_size = 64
+    N = 128
+    N_trgt = 40
+    N_ctxt = N - N_trgt
     options.batch_size = batch_size
-    options.emb_dim = 1024
+    options.emb_dim = 512
     options.embed_dims[-1] = options.emb_dim
     # options.fc_params = [(128, 0), (256, 0), (512, 0), (options.emb_dim, 0)]
     options.fc_params = None
@@ -58,6 +59,9 @@ if __name__ == "__main__":
         "split_mask": trgt_split_mask,
     }
     full_jet = {"p4": x, "p4_spatial": v, "particle_mask": full_particle_mask}
+    for dict in [context, target, full_jet]:
+        for key in dict:
+            print(key, dict[key].shape)
     pred_repr, target_repr, context_repr = jjepa_model(context, target, full_jet)
     print("pred_repr", pred_repr.shape)
     print("target_repr", target_repr.shape)
