@@ -29,7 +29,7 @@ from sklearn.metrics import accuracy_score
 from sklearn import metrics
 
 
-from src.models.jjepa import JJEPA
+from src.models.jjepa_old import JJEPA
 from src.options import Options
 from src.dataset.JetDataset import JetDataset
 
