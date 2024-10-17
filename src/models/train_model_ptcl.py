@@ -247,8 +247,25 @@ def main(rank, world_size, args):
     model = model.to(dtype=torch.float32)
 
     def check_for_nan(module, input, output):
-        if torch.isnan(output).any():
-            logger.info(f"NaN detected in output of {module}")
+        # Check inputs
+        for idx, inp in enumerate(input):
+            if torch.is_tensor(inp) and (
+                torch.isnan(inp).any() or torch.isinf(inp).any()
+            ):
+                print(f"NaN or Inf detected in input {idx} of {module}")
+
+        # Check outputs
+        if torch.is_tensor(output):
+            if torch.isnan(output).any() or torch.isinf(output).any():
+                print(f"NaN or Inf detected in output of {module}")
+        elif isinstance(output, tuple):
+            for idx, out in enumerate(output):
+                if torch.is_tensor(out) and (
+                    torch.isnan(out).any() or torch.isinf(out).any()
+                ):
+                    print(f"NaN or Inf detected in output {idx} of {module}")
+        else:
+            print(f"Output of {module} is neither Tensor nor Tuple")
 
     for _, module in model.named_modules():
         module.register_forward_hook(check_for_nan)
