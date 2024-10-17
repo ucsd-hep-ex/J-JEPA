@@ -29,5 +29,12 @@
     "skip_connections": true,
     "start_epochs": 0,
     "use_amp": false,
-    "use_predictor": true
+    "use_predictor": true,
+    "trgt_ratio": 0.3,
+    "max_targets": 21,
+    "use_parT": true,
+    "fc_params": [],
+    "embed_dims":[128, 512, 128],
+    "predictor_embed_dims": [64, 64, 64]
+
 }

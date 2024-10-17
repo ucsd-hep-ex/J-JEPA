@@ -24,12 +24,6 @@ class Options(Namespace):
         # =========================================================================================
         # Dataset Structure
         # =========================================================================================
-        # Top level of the .h5 dataset is jet
-        # number of subjets per jet
-        self.num_subjets: int = 20
-
-        # number of particles per jet
-        self.num_particles: int = 30
 
         # number of particle features per particle
         self.num_part_ftr: int = 4
@@ -149,9 +143,6 @@ class Options(Namespace):
         # projector MLP params, None -> no projector after attention layers.
         # Format: [(out_dim, drop_rate) for layer in range(num_layers)]
         self.fc_params: list = None
-
-        # number of target particles in a jet
-        self.N_trgt: int = 30
 
         # parameters for class attention blocks (used for aggregating ptcl features into jet features)
         self.cls_block_params: dict = {
