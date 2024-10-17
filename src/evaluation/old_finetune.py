@@ -121,7 +121,7 @@ def main(args):
     # set up results directory
     if args.flatten:
         args.output_dim *= 20
-    out_dir = args.out_dir
+    out_dir = args.out_dir + "/"
     args.opt = "adam"
     args.learning_rate = 0.00005 * args.batch_size / 128
 
