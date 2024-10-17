@@ -52,8 +52,7 @@ def Projector(mlp, embedding):
 
 
 # load data
-def load_data(dataset_path, tag=None):
-    # data_dir = f"{dataset_path}/{flag}/processed/4_features"
+def load_data(dataset_path):
     num_jets = 100 * 1000
     datset = ParticleDataset(dataset_path, labels=True, num_jets=num_jets)
     dataloader = DataLoader(datset, batch_size=args.batch_size, shuffle=True)
@@ -122,7 +121,7 @@ def main(args):
     args.output_dim = options.emb_dim
 
     if args.flatten:
-        args.output_dim *= 20
+        args.output_dim *= 128
     out_dir = args.out_dir
     args.opt = "adam"
     args.learning_rate = 0.00005 * args.batch_size / 128
@@ -172,8 +171,8 @@ def main(args):
     print(f"finetune: {args.finetune}", file=logfile, flush=True)
 
     print("loading data")
-    train_dataloader = load_data(args.train_dataset_path, "train")
-    val_dataloader = load_data(args.val_dataset_path, "val")
+    train_dataloader = load_data(args.train_dataset_path)
+    val_dataloader = load_data(args.val_dataset_path)
 
     t1 = time.time()
 
@@ -232,17 +231,22 @@ def main(args):
         # the inner loop goes through the dataset batch by batch
         proj.train()
         pbar = tqdm(train_dataloader)
-        for i, (x, _, subjets, _, subjet_mask, _, labels) in enumerate(pbar):
+        for i, (p4_spatial, p4, particle_mask, labels) in enumerate(pbar):
             optimizer.zero_grad()
 
             y = labels.to(args.device)
-            x = x.view(x.shape[0], x.shape[1], -1)
-            x = x.to(args.device)
-            batch = {"particles": x.to(torch.float32)}
+            particle_mask = particle_mask.squeeze(-1).bool()
+            p4 = p4.to(dtype=torch.float32)
+            p4_spatial = p4_spatial.to(dtype=torch.float32)
+            p4 = p4.to(device, non_blocking=True)
+            p4_spatial = p4_spatial.to(device, non_blocking=True)
+            particle_mask = particle_mask.to(
+                device, non_blocking=True, dtype=torch.float32
+            )
             reps = net(
-                batch,
-                subjet_mask.to(args.device),
-                subjets_meta=subjets.to(args.device),
+                p4,
+                p4_spatial,
+                particle_mask,
                 split_mask=None,
             )
             if args.flatten:
@@ -269,15 +273,20 @@ def main(args):
         with torch.no_grad():
             proj.eval()
             pbar = tqdm(val_dataloader)
-            for i, (x, _, subjets, _, subjet_mask, _, labels) in enumerate(pbar):
+            for i, (p4_spatial, p4, particle_mask, labels) in enumerate(pbar):
                 y = labels.to(args.device)
-                x = x.view(x.shape[0], x.shape[1], -1)
-                x = x.to(args.device)
-                batch = {"particles": x.to(torch.float32)}
+                particle_mask = particle_mask.squeeze(-1).bool()
+                p4 = p4.to(dtype=torch.float32)
+                p4_spatial = p4_spatial.to(dtype=torch.float32)
+                p4 = p4.to(device, non_blocking=True)
+                p4_spatial = p4_spatial.to(device, non_blocking=True)
+                particle_mask = particle_mask.to(
+                    device, non_blocking=True, dtype=torch.float32
+                )
                 reps = net(
-                    batch,
-                    subjet_mask.to(args.device),
-                    subjets_meta=subjets.to(args.device),
+                    p4,
+                    p4_spatial,
+                    particle_mask,
                     split_mask=None,
                 )
                 if args.flatten:
