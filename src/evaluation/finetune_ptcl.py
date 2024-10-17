@@ -31,7 +31,7 @@ from sklearn import metrics
 
 from src.models.jjepa import JJEPA
 from src.options import Options
-from src.dataset.JetDataset import JetDataset
+from src.dataset.ParticleDataset import ParticleDataset
 
 
 # set the number of threads that pytorch will use
@@ -55,7 +55,7 @@ def Projector(mlp, embedding):
 def load_data(dataset_path, tag=None):
     # data_dir = f"{dataset_path}/{flag}/processed/4_features"
     num_jets = 100 * 1000
-    datset = JetDataset(dataset_path, labels=True, num_jets=num_jets)
+    datset = ParticleDataset(dataset_path, labels=True, num_jets=num_jets)
     dataloader = DataLoader(datset, batch_size=args.batch_size, shuffle=True)
     return dataloader
 
