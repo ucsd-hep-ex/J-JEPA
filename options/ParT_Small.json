@@ -5,7 +5,7 @@
     "checkpoint_freq": 10,
     "debug": false,
     "display_logging": true,
-    "emb_dim": 1024,
+    "emb_dim": 128,
     "embedding_skip_connections": true,
     "eps": 1e-07,
     "initial_embedding_skip_connections": false,
@@ -18,11 +18,11 @@
     "normalization": "LayerNorm",
     "num_embedding_layers": 10,
     "num_epochs": 300,
-    "num_heads": 16,
-    "num_jets": 1200000,
+    "num_heads": 8,
+    "num_jets": 12000,
     "num_layers": 6,
     "num_part_ftr": 4,
-    "num_val_jets": 400000,
+    "num_val_jets": 4000,
     "num_workers": 0,
     "scheduler": "cosine",
     "skip_connections": true,
@@ -33,7 +33,7 @@
     "max_targets": 21,
     "use_parT": true,
     "fc_params": [],
-    "embed_dims":[128, 512, 128],
-    "predictor_embed_dims": [64, 64, 64]
+    "embed_dims":[128, 256, 128],
+    "predictor_embed_dims": [32, 32, 32]
 
 }

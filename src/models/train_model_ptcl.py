@@ -87,9 +87,9 @@ def setup_environment(rank):
 def setup_data_loader(args, options, data_path, world_size, rank, tag="train"):
     if tag == "val":
         data_path = data_path.replace("train", "val")
-        dataset = ParticleDataset(data_path, num_jets=args.num_val_jets)
+        dataset = ParticleDataset(data_path, num_jets=options.num_val_jets)
     else:
-        dataset = ParticleDataset(data_path, num_jets=args.num_jets)
+        dataset = ParticleDataset(data_path, num_jets=options.num_jets)
 
     sampler = torch.utils.data.distributed.DistributedSampler(
         dataset, num_replicas=world_size, rank=rank, shuffle=True
