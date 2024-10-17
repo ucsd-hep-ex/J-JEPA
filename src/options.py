@@ -27,6 +27,8 @@ class Options(Namespace):
 
         # number of particle features per particle
         self.num_part_ftr: int = 4
+        self.num_particles: int = 30
+        
 
         # =========================================================================================
         # Network Architecture
@@ -54,7 +56,7 @@ class Options(Namespace):
 
         # later embedding layers
         # embedding dimension size
-        self.emb_dim: int = 1024
+        self.emb_dim: int = 64
         self.predictor_emb_dim: int = 512
 
         # whether to add skip connections to the later embedding layers
