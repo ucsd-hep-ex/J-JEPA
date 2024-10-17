@@ -83,13 +83,13 @@ def load_model(options, model_path=None, device="cpu"):
         saved_state_dict = torch.load(model_path, map_location=device)
 
         # Adjust the keys
-        adjusted_state_dict = adjust_state_dict(saved_state_dict)
+        # adjusted_state_dict = adjust_state_dict(saved_state_dict)
 
         # print("Saved model keys:", adjusted_state_dict.keys())
         # print("Current model keys:", model.state_dict().keys())
 
         # Load the adjusted state_dict into the model
-        model.load_state_dict(adjusted_state_dict)
+        model.load_state_dict(saved_state_dict)
 
     print(model)
     return model
