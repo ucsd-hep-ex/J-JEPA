@@ -223,6 +223,9 @@ def main(args):
     model = load_model(options, args.load_jjepa_path, args.device)
     net = model.target_transformer
 
+    for param in net.parameters():
+        param.requires_grad = True
+
     # initialize the MLP projector
     finetune_mlp_dim = args.output_dim
     if args.finetune_mlp:
