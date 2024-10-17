@@ -33,6 +33,8 @@ torch.manual_seed(seed)
 np.random.seed(seed)
 random.seed(seed)
 
+torch.autograd.set_detect_anomaly(True)
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train JJEPA model")
@@ -243,6 +245,14 @@ def main(rank, world_size, args):
 
     model = JJEPA(options).to(device)
     model = model.to(dtype=torch.float32)
+
+    def check_for_nan(module, input, output):
+        if torch.isnan(output).any():
+            logger.info(f"NaN detected in output of {module}")
+
+    for _, module in model.named_modules():
+        module.register_forward_hook(check_for_nan)
+
     logger.info(model)
     # checkpoint = {
     #     "model": model.state_dict(),
@@ -361,6 +371,7 @@ def main(rank, world_size, args):
             total=int(train_dataset_size / options.batch_size),
             desc="Training",
         )
+        model.train()
         # ["p4_spatial (px, py, pz, e)", "p4 (eta, phi, log_pt, log_e)", "mask"]
         for itr, (p4_spatial, p4, particle_mask) in enumerate(pbar_t):
             particle_mask = particle_mask.squeeze(-1).bool()
