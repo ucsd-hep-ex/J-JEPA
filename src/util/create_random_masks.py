@@ -8,7 +8,7 @@ import fastjet
 import vector
 
 
-def get_subjets(px, py, pz, e, JET_ALGO="CA", jet_radius=0.2):
+def get_subjets(px, py, pz, e, JET_ALGO="CA", jet_radius=0.2, return_sorted=True):
     """
     Clusters particles into subjets using the specified jet clustering algorithm and jet radius,
     then returns information about the subjets sorted by their transverse momentum (pT) in descending order.
@@ -107,20 +107,22 @@ def get_subjets(px, py, pz, e, JET_ALGO="CA", jet_radius=0.2):
         subjets_info.append(subjet_dict)
 
     # subjets_info now contains the required dictionaries for each subjet
-    subjets_info_sorted = sorted(
-        subjets_info, key=lambda x: x["features"]["pT"], reverse=True
-    )
+    subjets_info_sorted = subjets_info
+    if return_sorted:
+        subjets_info_sorted = sorted(
+            subjets_info, key=lambda x: x["features"]["pT"], reverse=True
+        )
 
     # subjets_info_sorted now contains the subjets sorted by pT in descending order
     return subjets_info_sorted
 
 
-def create_random_masks(p4_spatial, ratio, max_targets):
+def create_random_masks(p4_spatial, ratio, max_targets, return_sorted=True):
     """
     Creates context and target masks for a batch of jets based on the provided ratio and max_targets.
 
     Parameters:
-    - p4_spatial: Torch tensor of shape (batch_size, 4, total_num_particles_padded) containing px, py, pz,
+    - p4_spatial: Torch tensor of shape (batch_size, total_num_particles_padded, 4) containing px, py, pz,
         and e (energy) of a batch of jets for input into get_subjets(px, py, pz, e, JET_ALGO="CA", jet_radius=0.2)
     - ratio: Float between 0 and 1, specifying the ratio of target particles to total non-padded particles.
     - max_targets: Integer, maximum number of target particles each jet should have.
@@ -129,6 +131,7 @@ def create_random_masks(p4_spatial, ratio, max_targets):
     - context_masks: Torch tensor of shape (batch_size, total_num_particles_padded), with 1s for context particles and 0s elsewhere.
     - target_masks: Torch tensor of shape (batch_size, total_num_particles_padded), with 1s for target particles and 0s elsewhere.
     """
+    p4_spatial = p4_spatial.transpose(1, 2)
     batch_size, _, total_num_particles_padded = p4_spatial.shape
 
     context_masks = torch.zeros(
@@ -149,7 +152,9 @@ def create_random_masks(p4_spatial, ratio, max_targets):
         N_non_padded = torch.count_nonzero(e)
 
         # Call get_subjets
-        subjets_info_sorted = get_subjets(px, py, pz, e, JET_ALGO="CA", jet_radius=0.2)
+        subjets_info_sorted = get_subjets(
+            px, py, pz, e, JET_ALGO="CA", jet_radius=0.2, return_sorted=return_sorted
+        )
 
         # Create masks for this jet
         context_mask, target_mask = create_random_masks_single(
@@ -164,7 +169,7 @@ def create_random_masks(p4_spatial, ratio, max_targets):
         context_masks[i] = context_mask
         target_masks[i] = target_mask
 
-    return context_masks, target_masks
+    return context_masks.bool(), target_masks.bool()
 
 
 def create_random_masks_single(

@@ -114,8 +114,8 @@ class ParTEncoder(nn.Module):
         # mask: (N, 1, P) -- real particle = 1, padded = 0
         # split_mask: (N, 1, P) -- keep in output = 1, ignore in output = 0
         pos_emb_input = torch.clone(x)  # (N, P, 4)
-        x = x.transpose(1, 2)  # (N, 4, P)
         v = v.transpose(1, 2) if v is not None else None  # (N, 4, P)
+        mask = mask.bool()
         mask = mask.unsqueeze(1) if mask is not None else None  # (N, 1, P)
         split_mask = (
             split_mask.unsqueeze(1) if split_mask is not None else None
@@ -124,20 +124,28 @@ class ParTEncoder(nn.Module):
         padding_mask = ~mask.squeeze(1)  # (N, P)
         with torch.cuda.amp.autocast(enabled=self.options.use_amp):
             # input embedding
-            x = self.embed(x).masked_fill(~mask.permute(2, 0, 1), 0)  # (P, N, emb_dim)
+            embed_mask = ~mask.transpose(1, 2)  # (N, P, 1)
+            x = self.embed(x).masked_fill(embed_mask, 0)  # (N, P, options.emb_dim)
             if self.options.encoder_pos_emb:
-                pos_emb = self.calc_pos_emb(pos_emb_input).transpose(
-                    0, 1
-                )  # (P, N, emb_dim)
-                print(f"pos_emb shape: {pos_emb.shape}")
-                print(f"x shape: {x.shape}")
+                pos_emb = self.calc_pos_emb(pos_emb_input)  # (N, P, options.emb_dim)
                 x += pos_emb
             attn_mask = None
             if (v is not None or uu is not None) and self.pair_embed is not None:
                 attn_mask = self.pair_embed(v, uu).view(
                     -1, v.size(-1), v.size(-1)
                 )  # (N*num_heads, P, P)
+            x = x.transpose(0, 1)  # (P, N, options.emb_dim) for transformer
+            """
+            Args:
+                x (Tensor): input to the layer of shape `(seq_len, batch, embed_dim)`
+                x_cls (Tensor, optional): class token input to the layer of shape `(1, batch, embed_dim)`
+                padding_mask (ByteTensor, optional): binary
+                    ByteTensor of shape `(batch, seq_len)` where padding
+                    elements are indicated by ``1``.
 
+            Returns:
+                encoded output of shape `(seq_len, batch, embed_dim)`
+            """
             for block in self.blocks:
                 x = block(x, x_cls=None, padding_mask=padding_mask, attn_mask=attn_mask)
             x_cls = x
@@ -204,9 +212,9 @@ class ParTEncoder(nn.Module):
                 )
                 x_cls = selected_particles_padded  # (B, max_length, emb_dim)
             if self.fc is None:
-                print(f"encoder output shape: {x_cls.transpose(0, 1).shape}")
-                return x_cls.transpose(0, 1)
-            output = self.fc(x_cls).transpose(0, 1)
+                # print("x_cls shape:", x_cls.shape)
+                return x_cls
+            output = self.fc(x_cls)
             return output
 
 
@@ -254,7 +262,6 @@ class ParTPredictor(nn.Module):
         pred_emb_input_dim = (
             options.fc_params[-1][0] if options.fc_params else embed_dim
         )
-        print(f"pred_emb_input_dim: {pred_emb_input_dim}")
         self.embed = (
             Embed(
                 pred_emb_input_dim,
@@ -264,8 +271,6 @@ class ParTPredictor(nn.Module):
             if len(self.options.embed_dims) > 0
             else nn.Identity()
         )
-        print("embedding layers of ParTPredictor")
-        print(self.embed)
         self.calc_predictor_pos_emb = create_space_pos_emb_fn(
             options.predictor_embed_dims[-1]
         )
@@ -304,7 +309,7 @@ class ParTPredictor(nn.Module):
     ):
         """
         new inputs:
-            x: (B, N_ctxt, 4) [eta, phi, log_pt, log_energy]
+            x: (B, N_ctxt, emb_dim)
             ctxt_particle_mask: (B,  N_ctxt) -- real particle = 1, padded = 0
             trgt_particle_mask: (B,  N_trgt) -- real particle = 1, padded = 0
             target_particle_ftrs: (B, N_trgt, 4) [eta, phi, log_pt, log_energy]
@@ -331,12 +336,8 @@ class ParTPredictor(nn.Module):
         if self.options.debug:
             print(f"ParTPredictor forward pass with input shape: {x.shape}")
 
-        print(f"ParTPredictor embedding with input x shape: {x.shape}")
-        x = self.embed(x.transpose(1, 2))
-        print(f"ParTPredictor embedding output shape: {x.shape}")
+        x = self.embed(x)
         pos_emb = self.calc_predictor_pos_emb(context_particle_ftrs)
-        print(f"pos_emb shape: {pos_emb.shape}")
-        print(f"x shape: {x.shape}")
         x += pos_emb
 
         B, N_ctxt, D = x.shape
@@ -344,7 +345,6 @@ class ParTPredictor(nn.Module):
 
         # Prepare position embeddings for target particles
         trgt_pos_emb = self.calc_predictor_pos_emb(target_particle_ftrs)
-        print(f"trgt_pos_emb shape: {trgt_pos_emb.shape}")
         assert trgt_pos_emb.shape[2] == D
 
         # Create prediction tokens

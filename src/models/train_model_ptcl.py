@@ -4,6 +4,7 @@ import logging
 import argparse
 from pathlib import Path
 import json
+from tqdm import tqdm
 
 import numpy as np
 
@@ -15,16 +16,24 @@ from torch.nn.parallel import DistributedDataParallel
 from torch.cuda.amp import GradScaler, autocast
 import torch.distributed as dist
 import time
-from tqdm import tqdm
+import random
 
 import torch.cuda as cuda
 
 
 from src.options import Options
 from src.models.jjepa import JJEPA
-from src.dataset.JEPADataset import JEPADataset
+from src.dataset.ParticleDataset import ParticleDataset
+from src.util.create_random_masks import create_random_masks
 from src.util.cov_loss import covariance_loss
 from src.util.var_loss import variance_loss
+
+seed = 42
+torch.manual_seed(seed)
+np.random.seed(seed)
+random.seed(seed)
+
+torch.autograd.set_detect_anomaly(True)
 
 
 def parse_args():
@@ -75,49 +84,26 @@ def setup_environment(rank):
     torch.distributed.init_process_group(backend="nccl", init_method="env://")
 
 
-def setup_data_loader(options, data_path, world_size, rank, tag="train"):
+def setup_data_loader(args, options, data_path, world_size, rank, tag="train"):
     if tag == "val":
         data_path = data_path.replace("train", "val")
-        dataset = JEPADataset(data_path, num_jets=args.num_val_jets)
+        dataset = ParticleDataset(data_path, num_jets=options.num_val_jets)
     else:
-        dataset = JEPADataset(data_path, num_jets=args.num_jets)
+        dataset = ParticleDataset(data_path, num_jets=options.num_jets)
 
     sampler = torch.utils.data.distributed.DistributedSampler(
         dataset, num_replicas=world_size, rank=rank, shuffle=True
     )
+    shuffle = False if sampler is not None else (tag == "train")
     loader = DataLoader(
         dataset,
         batch_size=options.batch_size,
-        shuffle=False,
+        shuffle=shuffle,
         num_workers=options.num_workers,
         pin_memory=True,
         sampler=sampler,
     )
     return loader, sampler, len(dataset)
-
-
-def create_random_masks(batch_size, num_subjets, device, context_scale=0.7):
-    context_masks = []
-    target_masks = []
-
-    # print("Batch size", batch_size)
-
-    for _ in range(batch_size):
-        indices = torch.randperm(num_subjets, device=device)
-        context_size = int(num_subjets * context_scale)
-        context_indices = indices[:context_size]
-        target_indices = indices[context_size:]
-
-        context_mask = torch.zeros(num_subjets, device=device)
-        target_mask = torch.zeros(num_subjets, device=device)
-
-        context_mask[context_indices] = 1
-        target_mask[target_indices] = 1
-
-        context_masks.append(context_mask)
-        target_masks.append(target_mask)
-
-    return torch.stack(context_masks).bool(), torch.stack(target_masks).bool()
 
 
 def save_checkpoint(model, optimizer, epoch, loss_train, loss_val, output_dir):
@@ -250,11 +236,41 @@ def main(rank, world_size, args):
 
     setup_logging(rank, args.output_dir)
     logger.info(f"Initialized (rank/world-size) {rank}/{world_size}")
+    if options.use_parT:
+        logger.info("Using ParticleTransformer")
+    else:
+        logger.info("Using JetTransformer")
     logger.info(f"covariance loss weight: {options.cov_loss_weight}")
     logger.info(f"variance loss weight: {options.var_loss_weight}")
 
     model = JJEPA(options).to(device)
     model = model.to(dtype=torch.float32)
+
+    def check_for_nan(module, input, output):
+        # Check inputs
+        for idx, inp in enumerate(input):
+            if torch.is_tensor(inp) and (
+                torch.isnan(inp).any() or torch.isinf(inp).any()
+            ):
+                print(f"NaN or Inf detected in input {idx} of {module}")
+
+        # Check outputs
+        if torch.is_tensor(output):
+            if torch.isnan(output).any() or torch.isinf(output).any():
+                print(f"NaN or Inf detected in output of {module}")
+        elif isinstance(output, tuple):
+            for idx, out in enumerate(output):
+                if torch.is_tensor(out) and (
+                    torch.isnan(out).any() or torch.isinf(out).any()
+                ):
+                    print(f"NaN or Inf detected in output {idx} of {module}")
+        else:
+            print(f"Output of {module} is neither Tensor nor Tuple")
+
+    for _, module in model.named_modules():
+        module.register_forward_hook(check_for_nan)
+
+    logger.info(model)
     # checkpoint = {
     #     "model": model.state_dict(),
     #     "optimizer": optimizer.state_dict(),
@@ -271,10 +287,10 @@ def main(rank, world_size, args):
         model = DistributedDataParallel(model, device_ids=[rank])
 
     train_loader, train_sampler, train_dataset_size = setup_data_loader(
-        options, args.data_path, world_size, rank, tag="train"
+        args, options, args.data_path, world_size, rank, tag="train"
     )
     val_loader, val_sampler, val_dataset_size = setup_data_loader(
-        options, args.data_path, world_size, rank, tag="val"
+        args, options, args.data_path, world_size, rank, tag="val"
     )
     logger.info(f"Train dataset size: {train_dataset_size}")
     logger.info(f"Val dataset size: {val_dataset_size}")
@@ -317,7 +333,6 @@ def main(rank, world_size, args):
     for p in model.target_transformer.parameters():
         p.requires_grad = False
 
-    logger.info("Using AdamW")
     if args.lr:
         options.lr = args.lr
     optimizer = optim.AdamW(
@@ -329,9 +344,6 @@ def main(rank, world_size, args):
     if checkpoint:
         optimizer.load_state_dict(checkpoint["optimizer"])
         logger.info(f"Loaded optimizer state from {args.load_checkpoint}")
-    # optimizer = optim.AdamW(
-    #     model.parameters(), lr=options.lr, weight_decay=options.weight_decay
-    # )
     scheduler = optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=options.num_epochs
     )
@@ -353,6 +365,7 @@ def main(rank, world_size, args):
     for epoch in range(options.start_epochs, options.num_epochs):
         logger.info("Epoch %d" % (epoch + 1))
         logger.info("lr: %f" % scheduler.get_last_lr()[0])
+        epoch_start_time = time.time()
 
         if train_sampler:
             train_sampler.set_epoch(epoch)
@@ -375,139 +388,110 @@ def main(rank, world_size, args):
             total=int(train_dataset_size / options.batch_size),
             desc="Training",
         )
-
-        for itr, (
-            x,
-            particle_features,
-            subjets,
-            particle_indices,
-            subjet_mask,
-            particle_mask,
-        ) in enumerate(pbar_t):
-            x = x.to(dtype=torch.float32)
-            x = x.to(device, non_blocking=True)
-            x = x.view(
-                x.shape[0],
-                options.num_subjets,
-                options.num_particles * options.num_part_ftr,
-            )
-
-            particle_features = particle_features.to(
-                device, non_blocking=True, dtype=torch.float32
-            )
-            subjets = subjets.to(device, non_blocking=True, dtype=torch.float32)
-            particle_indices = particle_indices.to(
-                device, non_blocking=True, dtype=torch.float32
-            )
-            subjet_mask = subjet_mask.to(device, non_blocking=True, dtype=torch.float32)
+        model.train()
+        # ["p4_spatial (px, py, pz, e)", "p4 (eta, phi, log_pt, log_e)", "mask"]
+        for itr, (p4_spatial, p4, particle_mask) in enumerate(pbar_t):
+            particle_mask = particle_mask.squeeze(-1).bool()
+            p4 = p4.to(dtype=torch.float32)
+            p4_spatial = p4_spatial.to(dtype=torch.float32)
+            p4 = p4.to(device, non_blocking=True)
+            p4_spatial = p4_spatial.to(device, non_blocking=True)
             particle_mask = particle_mask.to(
                 device, non_blocking=True, dtype=torch.float32
             )
 
             context_masks, target_masks = create_random_masks(
-                x.shape[0], options.num_subjets, device
+                p4_spatial,
+                ratio=options.trgt_ratio,
+                max_targets=options.max_targets,
             )
+            context_masks = context_masks.to(device)
+            target_masks = target_masks.to(device)
+
+            context_masks_expanded = context_masks.unsqueeze(-1)  # Shape: [B, N, 1]
+            context_masks_expanded = context_masks_expanded.expand(
+                -1, -1, 4
+            )  # Shape: [B, N, 4]
+
+            target_masks_expanded = target_masks.unsqueeze(-1)  # Shape: [B, N, 1]
+            target_masks_expanded = target_masks_expanded.expand(
+                -1, -1, 4
+            )  # Shape: [B, N, 4]
 
             def train_step():
-                # options = Options.load(args.config)
+                cov_loss = 0
+                var_loss = 0
                 optimizer.zero_grad()
 
-                # print(" subjet", subjets.shape)
-                # print("context mask", context_masks.shape)
-                # print("target mask", target_masks.shape)
-
-                # remove the zeros and collapse it to the correct shape
-                sub_j_context = subjets[context_masks]
-                num_ctxt_selected = context_masks.sum(
-                    dim=1
-                ).min()  # Minimum to handle potentially non-uniform selections
-                selected_sub_j_context = sub_j_context.view(
-                    subjets.shape[0], num_ctxt_selected, subjets.shape[-1]
-                )
-                # print("sub_j_context", selected_sub_j_context.shape)
-
-                sub_j_target = subjets[target_masks]
-                num_tgt_selected = target_masks.sum(
-                    dim=1
-                ).min()  # Minimum to handle potentially non-uniform selections
-                selected_sub_j_target = sub_j_target.view(
-                    subjets.shape[0], num_tgt_selected, subjets.shape[-1]
-                )
-                # print("sub_j_target", selected_sub_j_target.shape)
-
-                context_subjets_mask = subjet_mask[context_masks]
-                num_cxt_subj_mask_selected = context_masks.sum(
-                    dim=1
-                ).min()  # Minimum to handle potentially non-uniform selections
-                context_subjets_mask = context_subjets_mask.view(
-                    subjets.shape[0], num_cxt_subj_mask_selected
-                )
-
-                target_subject_mask = subjet_mask[target_masks]
-                num_trg_subj_mask_selected = target_masks.sum(
-                    dim=1
-                ).min()  # Minimum to handle potentially non-uniform selections
-                target_subjets_mask = target_subject_mask.view(
-                    subjets.shape[0], num_trg_subj_mask_selected
-                )
-
                 with autocast(enabled=options.use_amp):
+                    B = p4_spatial.shape[0]
+                    N_ctxt = context_masks.sum(dim=1).max().item()
+                    N_trgt = target_masks.sum(dim=1).max().item()
+                    p4_spatial_context = p4_spatial[context_masks_expanded].view(
+                        B, N_ctxt, 4
+                    )
+                    p4_spatial_target = p4_spatial[target_masks_expanded].view(
+                        B, N_trgt, 4
+                    )
+                    ctxt_particle_mask = particle_mask[context_masks].view(B, N_ctxt)
+                    trgt_particle_mask = particle_mask[target_masks].view(B, N_trgt)
+
                     context = {
-                        "subjets": selected_sub_j_context.to(device),
-                        "particle_mask": particle_mask.to(device),
-                        "subjet_mask": context_subjets_mask.to(device),
-                        "split_mask": context_masks.to(device),
+                        "p4_spatial": p4_spatial_context,
+                        "particle_mask": ctxt_particle_mask,
+                        "split_mask": context_masks,
                     }
                     target = {
-                        "subjets": selected_sub_j_target.to(device),
-                        "particle_mask": particle_mask.to(device),
-                        "subjet_mask": target_subjets_mask.to(device),
-                        "split_mask": target_masks.to(device),
+                        "p4_spatial": p4_spatial_target,
+                        "particle_mask": trgt_particle_mask,
+                        "split_mask": target_masks,
                     }
                     full_jet = {
-                        "particles": x,
-                        "particle_mask": particle_mask.to(device),
-                        "subjet_mask": subjet_mask.to(device),
-                        "subjets": subjets.to(device),
+                        "p4": p4,
+                        "p4_spatial": p4_spatial,
+                        "particle_mask": particle_mask,
                     }
-
                     pred_repr, target_repr, context_repr = model(
                         context, target, full_jet
                     )
                     mse_loss = nn.functional.mse_loss(pred_repr, target_repr)
                     loss = mse_loss.clone()
                     # apply target and context masks when calculating covariance and variance loss
-                    context_mask_expanded = context_subjets_mask.unsqueeze(-1)
-                    masked_context_reps = context_repr * context_mask_expanded
-                    target_mask_expanded = target_subjets_mask.unsqueeze(-1)
-                    masked_target_reps = target_repr * target_mask_expanded
-                    if options.cov_loss_weight > 0:
-                        cov_loss = (
-                            covariance_loss(target_repr) / 2
-                            + covariance_loss(context_repr) / 2
-                        )
-                        loss += options.cov_loss_weight * cov_loss
-                    if options.var_loss_weight > 0:
-                        var_loss = (
-                            variance_loss(masked_target_reps, target_subjets_mask) / 2
-                            + variance_loss(masked_context_reps, context_subjets_mask)
-                            / 2
-                        )
-                        loss += options.var_loss_weight * var_loss
+                    if options.cov_loss_weight > 0 or options.var_loss_weight > 0:
+                        context_mask_expanded = ctxt_particle_mask.unsqueeze(-1)
+                        masked_context_reps = context_repr * context_mask_expanded
+                        target_mask_expanded = trgt_particle_mask.unsqueeze(-1)
+                        masked_target_reps = target_repr * target_mask_expanded
+                        if options.cov_loss_weight > 0:
+                            cov_loss = (
+                                covariance_loss(target_repr) / 2
+                                + covariance_loss(context_repr) / 2
+                            )
+                            loss += options.cov_loss_weight * cov_loss
+                        if options.var_loss_weight > 0:
+                            var_loss = (
+                                variance_loss(masked_target_reps, trgt_particle_mask)
+                                / 2
+                                + variance_loss(masked_context_reps, ctxt_particle_mask)
+                                / 2
+                            )
+                            loss += options.var_loss_weight * var_loss
 
                     if options.use_amp:
                         scaler.scale(loss).backward()
                         scaler.unscale_(optimizer)
-                        torch.nn.utils.clip_grad_norm_(
-                            model.parameters(), options.max_grad_norm
-                        )
+                        if options.max_grad_norm > 0:
+                            torch.nn.utils.clip_grad_norm_(
+                                model.parameters(), options.max_grad_norm
+                            )
                         scaler.step(optimizer)
                         scaler.update()
                     else:
                         loss.backward()
-                        # torch.nn.utils.clip_grad_norm_(
-                        #     model.parameters(), options.max_grad_norm
-                        # )
+                        if options.max_grad_norm > 0:
+                            torch.nn.utils.clip_grad_norm_(
+                                model.parameters(), options.max_grad_norm
+                            )
                         optimizer.step()
 
                     # Step 3. momentum update of target encoder
@@ -530,8 +514,10 @@ def main(rank, world_size, args):
             loss_dict, etime = gpu_timer(train_step)
             loss_meter_train.update(loss_dict["total_loss"])
             mse_loss_meter_train.update(loss_dict["mse_loss"])
-            cov_loss_meter_train.update(loss_dict["cov_loss"])
-            var_loss_meter_train.update(loss_dict["var_loss"])
+            if options.cov_loss_weight > 0:
+                cov_loss_meter_train.update(loss_dict["cov_loss"])
+            if options.var_loss_weight > 0:
+                var_loss_meter_train.update(loss_dict["var_loss"])
             time_meter_train.update(etime)
 
             if itr % options.log_freq == 0:
@@ -543,6 +529,8 @@ def main(rank, world_size, args):
                 )
                 log_gpu_stats(device)
 
+        train_time_end = time.time()
+        logger.info(f"Training time: {train_time_end - epoch_start_time:.1f} s")
         # validation
         pbar_v = tqdm(
             val_loader,
@@ -550,99 +538,65 @@ def main(rank, world_size, args):
             desc="Validation",
         )
 
-        for itr, (
-            x,
-            particle_features,
-            subjets,
-            particle_indices,
-            subjet_mask,
-            particle_mask,
-        ) in enumerate(pbar_v):
-            x = x.to(dtype=torch.float32)
-            x = x.to(device, non_blocking=True)
-            x = x.view(
-                x.shape[0],
-                options.num_subjets,
-                options.num_particles * options.num_part_ftr,
-            )
-
-            particle_features = particle_features.to(
-                device, non_blocking=True, dtype=torch.float32
-            )
-            subjets = subjets.to(device, non_blocking=True, dtype=torch.float32)
-            particle_indices = particle_indices.to(
-                device, non_blocking=True, dtype=torch.float32
-            )
-            subjet_mask = subjet_mask.to(device, non_blocking=True, dtype=torch.float32)
+        for itr, (p4_spatial, p4, particle_mask) in enumerate(pbar_v):
+            particle_mask = particle_mask.squeeze(-1).bool()
+            p4 = p4.to(dtype=torch.float32)
+            p4_spatial = p4_spatial.to(dtype=torch.float32)
+            p4 = p4.to(device, non_blocking=True)
+            p4_spatial = p4_spatial.to(device, non_blocking=True)
             particle_mask = particle_mask.to(
                 device, non_blocking=True, dtype=torch.float32
             )
 
             context_masks, target_masks = create_random_masks(
-                x.shape[0], options.num_subjets, device
+                p4_spatial,
+                ratio=options.trgt_ratio,
+                max_targets=options.max_targets,
             )
+            context_masks = context_masks.to(device)
+            target_masks = target_masks.to(device)
+
+            context_masks_expanded = context_masks.unsqueeze(-1)  # Shape: [B, N, 1]
+            context_masks_expanded = context_masks_expanded.expand(
+                -1, -1, 4
+            )  # Shape: [B, N, 4]
+
+            target_masks_expanded = target_masks.unsqueeze(-1)  # Shape: [B, N, 1]
+            target_masks_expanded = target_masks_expanded.expand(
+                -1, -1, 4
+            )  # Shape: [B, N, 4]
 
             def val_step():
-                optimizer.zero_grad()
-
-                # print(" subjet", subjets.shape)
-                # print("context mask", context_masks.shape)
-                # print("target mask", target_masks.shape)
-
-                # remove the zeros and collapse it to the correct shape
-                sub_j_context = subjets[context_masks]
-                num_ctxt_selected = context_masks.sum(
-                    dim=1
-                ).min()  # Minimum to handle potentially non-uniform selections
-                selected_sub_j_context = sub_j_context.view(
-                    subjets.shape[0], num_ctxt_selected, subjets.shape[-1]
-                )
-                # print("sub_j_context", selected_sub_j_context.shape)
-
-                sub_j_target = subjets[target_masks]
-                num_tgt_selected = target_masks.sum(
-                    dim=1
-                ).min()  # Minimum to handle potentially non-uniform selections
-                selected_sub_j_target = sub_j_target.view(
-                    subjets.shape[0], num_tgt_selected, subjets.shape[-1]
-                )
-                # print("sub_j_target", selected_sub_j_target.shape)
-
-                context_subjets_mask = subjet_mask[context_masks]
-                num_cxt_subj_mask_selected = context_masks.sum(
-                    dim=1
-                ).min()  # Minimum to handle potentially non-uniform selections
-                context_subjets_mask = context_subjets_mask.view(
-                    subjets.shape[0], num_cxt_subj_mask_selected
-                )
-
-                target_subject_mask = subjet_mask[target_masks]
-                num_trg_subj_mask_selected = target_masks.sum(
-                    dim=1
-                ).min()  # Minimum to handle potentially non-uniform selections
-                target_subjets_mask = target_subject_mask.view(
-                    subjets.shape[0], num_trg_subj_mask_selected
-                )
-
+                cov_loss = 0
+                var_loss = 0
                 with torch.no_grad():
                     model.eval()
+                    B = p4_spatial.shape[0]
+                    N_ctxt = context_masks.sum(dim=1).max().item()
+                    N_trgt = target_masks.sum(dim=1).max().item()
+                    p4_spatial_context = p4_spatial[context_masks_expanded].view(
+                        B, N_ctxt, 4
+                    )
+                    p4_spatial_target = p4_spatial[target_masks_expanded].view(
+                        B, N_trgt, 4
+                    )
+                    ctxt_particle_mask = particle_mask[context_masks].view(B, N_ctxt)
+                    trgt_particle_mask = particle_mask[target_masks].view(B, N_trgt)
+
                     context = {
-                        "subjets": selected_sub_j_context.to(device),
-                        "particle_mask": particle_mask.to(device),
-                        "subjet_mask": context_subjets_mask.to(device),
-                        "split_mask": context_masks.to(device),
+                        "p4_spatial": p4_spatial_context,
+                        "particle_mask": ctxt_particle_mask,
+                        "split_mask": context_masks,
                     }
                     target = {
-                        "subjets": selected_sub_j_target.to(device),
-                        "particle_mask": particle_mask.to(device),
-                        "subjet_mask": target_subjets_mask.to(device),
-                        "split_mask": target_masks.to(device),
+                        "p4_spatial": p4_spatial_target,
+                        "particle_mask": trgt_particle_mask,
+                        "split_mask": target_masks,
                     }
                     full_jet = {
-                        "particles": x,
-                        "particle_mask": particle_mask.to(device),
-                        "subjet_mask": subjet_mask.to(device),
-                        "subjets": subjets.to(device),
+                        "p4": p4,
+                        "p4_spatial": p4_spatial,
+                        "particle_mask": particle_mask,
                     }
 
                     pred_repr, target_repr, context_repr = model(
@@ -651,23 +605,25 @@ def main(rank, world_size, args):
                     mse_loss = nn.functional.mse_loss(pred_repr, target_repr)
                     loss = mse_loss.clone()
                     # apply target and context masks when calculating covariance and variance loss
-                    context_mask_expanded = context_subjets_mask.unsqueeze(-1)
-                    masked_context_reps = context_repr * context_mask_expanded
-                    target_mask_expanded = target_subjets_mask.unsqueeze(-1)
-                    masked_target_reps = target_repr * target_mask_expanded
-                    if options.cov_loss_weight > 0:
-                        cov_loss = (
-                            covariance_loss(target_repr) / 2
-                            + covariance_loss(context_repr) / 2
-                        )
-                        loss += options.cov_loss_weight * cov_loss
-                    if options.var_loss_weight > 0:
-                        var_loss = (
-                            variance_loss(masked_target_reps, target_subjets_mask) / 2
-                            + variance_loss(masked_context_reps, context_subjets_mask)
-                            / 2
-                        )
-                        loss += options.var_loss_weight * var_loss
+                    if options.cov_loss_weight > 0 or options.var_loss_weight > 0:
+                        context_mask_expanded = ctxt_particle_mask.unsqueeze(-1)
+                        masked_context_reps = context_repr * context_mask_expanded
+                        target_mask_expanded = trgt_particle_mask.unsqueeze(-1)
+                        masked_target_reps = target_repr * target_mask_expanded
+                        if options.cov_loss_weight > 0:
+                            cov_loss = (
+                                covariance_loss(target_repr) / 2
+                                + covariance_loss(context_repr) / 2
+                            )
+                            loss += options.cov_loss_weight * cov_loss
+                        if options.var_loss_weight > 0:
+                            var_loss = (
+                                variance_loss(masked_target_reps, trgt_particle_mask)
+                                / 2
+                                + variance_loss(masked_context_reps, ctxt_particle_mask)
+                                / 2
+                            )
+                            loss += options.var_loss_weight * var_loss
 
                 loss_dict = {
                     "total_loss": float(loss),
@@ -680,8 +636,10 @@ def main(rank, world_size, args):
             val_loss_dict, etime = gpu_timer(val_step)
             loss_meter_val.update(val_loss_dict["total_loss"])
             mse_loss_meter_val.update(val_loss_dict["mse_loss"])
-            cov_loss_meter_val.update(val_loss_dict["cov_loss"])
-            var_loss_meter_val.update(val_loss_dict["var_loss"])
+            if options.cov_loss_weight > 0:
+                cov_loss_meter_val.update(val_loss_dict["cov_loss"])
+            if options.var_loss_weight > 0:
+                var_loss_meter_val.update(val_loss_dict["var_loss"])
             time_meter_val.update(etime)
 
             if itr % options.log_freq == 0:
@@ -692,7 +650,7 @@ def main(rank, world_size, args):
                     f"mse loss: {mse_loss_meter_val.avg:+.3f}, cov loss: {cov_loss_meter_val.avg:+.3f}, var loss: {var_loss_meter_val.avg:+.3f}"
                 )
                 log_gpu_stats(device)
-
+        model.train()
         scheduler.step()
         if epoch % options.checkpoint_freq == 0:
             save_checkpoint(
@@ -700,18 +658,22 @@ def main(rank, world_size, args):
                 optimizer,
                 epoch,
                 loss_meter_train.avg,
-                loss_meter_val,
+                loss_meter_val.avg,
                 args.output_dir,
             )
 
         losses_train.append(loss_meter_train.avg)
         mse_losses_train.append(mse_loss_meter_train.avg)
-        cov_losses_train.append(cov_loss_meter_train.avg)
-        var_losses_train.append(var_loss_meter_train.avg)
+        if options.cov_loss_weight > 0:
+            cov_losses_train.append(cov_loss_meter_train.avg)
+        if options.var_loss_weight > 0:
+            var_losses_train.append(var_loss_meter_train.avg)
         losses_val.append(loss_meter_val.avg)
         mse_losses_val.append(mse_loss_meter_val.avg)
-        cov_losses_val.append(cov_loss_meter_val.avg)
-        var_losses_val.append(var_loss_meter_val.avg)
+        if options.cov_loss_weight > 0:
+            cov_losses_val.append(cov_loss_meter_val.avg)
+        if options.var_loss_weight > 0:
+            var_losses_val.append(var_loss_meter_val.avg)
         if loss_meter_val.avg < lowest_val_loss:
             logger.info(f"new lowest val loss: {loss_meter_val.avg:.3f}")
             logger.info("Saving best model")
@@ -724,10 +686,20 @@ def main(rank, world_size, args):
         np.save(os.path.join(args.output_dir, "val_losses.npy"), losses_val)
         np.save(os.path.join(args.output_dir, "train_mse_losses.npy"), mse_losses_train)
         np.save(os.path.join(args.output_dir, "val_mse_losses.npy"), mse_losses_val)
-        np.save(os.path.join(args.output_dir, "train_cov_losses.npy"), cov_losses_train)
-        np.save(os.path.join(args.output_dir, "val_cov_losses.npy"), cov_losses_val)
-        np.save(os.path.join(args.output_dir, "train_var_losses.npy"), var_losses_train)
-        np.save(os.path.join(args.output_dir, "val_var_losses.npy"), var_losses_val)
+        if options.cov_loss_weight > 0:
+            np.save(
+                os.path.join(args.output_dir, "train_cov_losses.npy"), cov_losses_train
+            )
+            np.save(os.path.join(args.output_dir, "val_cov_losses.npy"), cov_losses_val)
+        if options.var_loss_weight > 0:
+            np.save(
+                os.path.join(args.output_dir, "train_var_losses.npy"), var_losses_train
+            )
+            np.save(os.path.join(args.output_dir, "val_var_losses.npy"), var_losses_val)
+
+        epoch_end_time = time.time()
+        logger.info(f"Validation time: {epoch_end_time - train_time_end:.1f} s")
+        logger.info(f"Epoch time: {epoch_end_time - epoch_start_time:.1f} s")
 
 
 if __name__ == "__main__":

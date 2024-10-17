@@ -1,6 +1,7 @@
 import sys
 import torch
 from src.models.ParT.ParticleTransformerEncoder import ParTEncoder, ParTPredictor
+from src.models.ParT.ParticleTransformer import ParticleTransformer
 from src.options import Options
 
 
@@ -52,3 +53,14 @@ if __name__ == "__main__":
         context_features,
     )
     print(f"Predictor Output shape: {output.shape}")
+
+    # test ParticleTransformer
+    parT = ParticleTransformer(input_dim=4)
+
+    batch_size = 16
+    N_ptcls = 50
+    x = v = torch.rand((batch_size, 4, N_ptcls))
+
+    mask_shape = (batch_size, 1, N_ptcls)
+    mask = torch.rand(mask_shape) > 0.5
+    out = parT(x, v, mask)

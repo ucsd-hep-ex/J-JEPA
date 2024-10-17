@@ -152,7 +152,6 @@ class JetsTransformer(nn.Module):
         self.embed_dim = options.emb_dim
         self.calc_pos_emb = create_pos_emb_fn(options, options.emb_dim)
 
-        # Adjust the input dimensions based on the new input shape
         print("num_particles", options.num_particles)
         print("num_part_ftr", options.num_part_ftr)
         
@@ -320,7 +319,7 @@ class JJEPA(nn.Module):
             print("Initializing JJEPA module")
         self.use_predictor = options.use_predictor
         self.use_parT = options.use_parT
-
+        
         if self.use_parT:
             self.context_transformer = ParTEncoder(options=options)
         else:
