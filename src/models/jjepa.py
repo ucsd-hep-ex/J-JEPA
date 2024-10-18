@@ -43,8 +43,6 @@ class Attention(nn.Module):
         self.scale = options.qk_scale or self.head_dim**-0.5
         self.W_qkv = nn.Linear(self.dim, self.dim * 3, bias=options.qkv_bias)
         self.attn_drop = nn.Dropout(options.attn_drop)
-        self.proj = nn.Linear(self.dim, self.dim)
-        self.activation = create_activation(options.activation, self.dim)
         self.proj_drop = nn.Dropout(options.proj_drop)
 
         self.multihead_attn = nn.MultiheadAttention(
@@ -72,8 +70,6 @@ class Attention(nn.Module):
 
         x, _ = self.multihead_attn(q, k, v, key_padding_mask=subjet_masks)
 
-        x = self.proj(x)
-        x = self.activation(x)
         x = self.proj_drop(x)
         if self.options.debug:
             print(f"Attention output shape: {x.shape}")
@@ -199,10 +195,11 @@ class JetsTransformer(nn.Module):
         x = self.subjet_emb(x)
 
         # pos emb
-        pos_emb = self.calc_pos_emb(subjets_meta)
-        if self.options.debug:
-            print(pos_emb.shape)
-        x += pos_emb
+        if self.options.encoder_pos_emb:
+            pos_emb = self.calc_pos_emb(subjets_meta)
+            if self.options.debug:
+                print(pos_emb.shape)
+            x += pos_emb
 
         # forward prop
         for blk in self.blocks:
@@ -291,14 +288,13 @@ class JetsTransformerPredictor(nn.Module):
         assert trgt_pos_emb.shape[2] == D
         # (B, N_trgt, D) -> (B*N_trgt, 1, D) following FAIR_src
         trgt_pos_emb = trgt_pos_emb.view(B * N_trgt, 1, D)
-        # TODO: add an learnable token
         pred_token = self.mask_token.repeat(
             trgt_pos_emb.size(0), trgt_pos_emb.size(1), 1
         )
         pred_token += trgt_pos_emb
 
         # (B, N_ctxt, D) -> (B * N_trgt, N_ctxt, D)
-        x = x.repeat(N_trgt, 1, 1)
+        x = x.repeat_interleave(N_trgt, dim=0)
 
         x = torch.cat([x, pred_token], axis=1)
 
