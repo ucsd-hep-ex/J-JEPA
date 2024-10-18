@@ -394,8 +394,8 @@ class JJEPA(nn.Module):
                 context_repr,
                 context["particle_mask"],
                 target["particle_mask"],
-                target["p4_spatial"],
-                context["p4_spatial"],
+                target["p4"],
+                context["p4"],
             )
             if self.options.debug:
                 pred_repr = self.predictor_check(pred_repr)
