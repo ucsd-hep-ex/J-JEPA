@@ -318,7 +318,7 @@ class JJEPA(nn.Module):
         if self.options.debug:
             print("Initializing JJEPA module")
         self.use_predictor = options.use_predictor
-        self.use_parT = False
+        self.use_parT = options.use_parT
         
         if self.use_parT:
             self.context_transformer = ParTEncoder(options=options)

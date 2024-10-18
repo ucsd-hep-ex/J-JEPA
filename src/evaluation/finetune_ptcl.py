@@ -54,7 +54,7 @@ def Projector(mlp, embedding):
 # load data
 def load_data(dataset_path):
     num_jets = 100 * 1000
-    datset = ParticleDataset(dataset_path, labels=True, num_jets=num_jets)
+    datset = ParticleDataset(dataset_path, return_labels=True, num_jets=num_jets)
     dataloader = DataLoader(datset, batch_size=args.batch_size, shuffle=True)
     return dataloader
 
@@ -122,7 +122,7 @@ def main(args):
 
     if args.flatten:
         args.output_dim *= 128
-    out_dir = args.out_dir
+    out_dir = args.out_dir + '/'
     args.opt = "adam"
     args.learning_rate = 0.00005 * args.batch_size / 128
 
@@ -519,6 +519,13 @@ if __name__ == "__main__":
         action="store",
         default=1,
         help="sum the representation",
+    )
+    parser.add_argument(
+        "--use-ParT",
+        type=int,
+        action="store",
+        default=1,
+        help="use particle transformer backbone",
     )
 
     args = parser.parse_args()
