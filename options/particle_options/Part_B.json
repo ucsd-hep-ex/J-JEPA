@@ -1,6 +1,6 @@
 {
     "activation": "gelu",
-    "base_momentum": 0.99,
+    "base_momentum": 0.1,
     "batch_size": 64,
     "checkpoint_freq": 10,
     "debug": false,
@@ -31,7 +31,7 @@
     "use_predictor": true,
     "trgt_ratio": 0.3,
     "max_targets": 21,
-    "use_parT": false,
+    "use_parT": true,
     "fc_params": [],
     "embed_dims":[128, 512, 128],
     "predictor_embed_dims": [64, 64, 64]
