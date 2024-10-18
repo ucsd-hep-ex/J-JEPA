@@ -427,22 +427,18 @@ def main(rank, world_size, args):
                     B = p4_spatial.shape[0]
                     N_ctxt = context_masks.sum(dim=1).max().item()
                     N_trgt = target_masks.sum(dim=1).max().item()
-                    p4_spatial_context = p4_spatial[context_masks_expanded].view(
-                        B, N_ctxt, 4
-                    )
-                    p4_spatial_target = p4_spatial[target_masks_expanded].view(
-                        B, N_trgt, 4
-                    )
+                    p4_context = p4[context_masks_expanded].view(B, N_ctxt, 4)
+                    p4_target = p4[target_masks_expanded].view(B, N_trgt, 4)
                     ctxt_particle_mask = particle_mask[context_masks].view(B, N_ctxt)
                     trgt_particle_mask = particle_mask[target_masks].view(B, N_trgt)
 
                     context = {
-                        "p4_spatial": p4_spatial_context,
+                        "p4": p4_context,
                         "particle_mask": ctxt_particle_mask,
                         "split_mask": context_masks,
                     }
                     target = {
-                        "p4_spatial": p4_spatial_target,
+                        "p4": p4_target,
                         "particle_mask": trgt_particle_mask,
                         "split_mask": target_masks,
                     }
@@ -574,22 +570,18 @@ def main(rank, world_size, args):
                     B = p4_spatial.shape[0]
                     N_ctxt = context_masks.sum(dim=1).max().item()
                     N_trgt = target_masks.sum(dim=1).max().item()
-                    p4_spatial_context = p4_spatial[context_masks_expanded].view(
-                        B, N_ctxt, 4
-                    )
-                    p4_spatial_target = p4_spatial[target_masks_expanded].view(
-                        B, N_trgt, 4
-                    )
+                    p4_context = p4[context_masks_expanded].view(B, N_ctxt, 4)
+                    p4_target = p4[target_masks_expanded].view(B, N_trgt, 4)
                     ctxt_particle_mask = particle_mask[context_masks].view(B, N_ctxt)
                     trgt_particle_mask = particle_mask[target_masks].view(B, N_trgt)
 
                     context = {
-                        "p4_spatial": p4_spatial_context,
+                        "p4": p4_context,
                         "particle_mask": ctxt_particle_mask,
                         "split_mask": context_masks,
                     }
                     target = {
-                        "p4_spatial": p4_spatial_target,
+                        "p4": p4_target,
                         "particle_mask": trgt_particle_mask,
                         "split_mask": target_masks,
                     }
