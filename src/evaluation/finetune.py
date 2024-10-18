@@ -76,20 +76,17 @@ def adjust_state_dict(saved_state_dict):
     return adjusted_state_dict
 
 
-def load_model(options, model_path=None, device="cpu"):
+def load_model(options, model_path=None, device="cpu", old=False):
     model = JJEPA(options).to(device)
     if model_path:
         # Load the saved state_dict
         saved_state_dict = torch.load(model_path, map_location=device)
-
         # Adjust the keys
-        adjusted_state_dict = adjust_state_dict(saved_state_dict)
-
-        # print("Saved model keys:", adjusted_state_dict.keys())
-        # print("Current model keys:", model.state_dict().keys())
-
-        # Load the adjusted state_dict into the model
-        model.load_state_dict(adjusted_state_dict)
+        if old:
+            adjusted_state_dict = adjust_state_dict(saved_state_dict)
+            model.load_state_dict(adjusted_state_dict)
+        else:
+            model.load_state_dict(saved_state_dict)
 
     print(model)
     return model
@@ -220,8 +217,11 @@ def main(args):
     )
 
     # initialise the network
-    model = load_model(options, args.load_jjepa_path, args.device)
+    model = load_model(options, args.load_jjepa_path, args.device, old=args.old)
     net = model.target_transformer
+
+    for param in net.parameters():
+        param.requires_grad = True
 
     # initialize the MLP projector
     finetune_mlp_dim = args.output_dim
@@ -532,6 +532,13 @@ if __name__ == "__main__":
         action="store",
         default=1,
         help="sum the representation",
+    )
+    parser.add_argument(
+        "--old",
+        type=int,
+        action="store",
+        default=0,
+        help="whether the pretrained model is old (old attention blocks before Billy's update)",
     )
 
     args = parser.parse_args()
