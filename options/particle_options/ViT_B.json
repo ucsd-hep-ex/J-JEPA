@@ -58,6 +58,7 @@
     "training_file": "",
     "use_amp": false,
     "use_predictor": true,
+    "use_parT": false,
     "validation_file": "",
     "warmup_epochs": 10,
     "warmup_start_lr": 1e-08,
