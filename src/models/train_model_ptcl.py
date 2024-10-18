@@ -73,6 +73,12 @@ def parse_args():
         default=1,
         help="flatten reps when calculating variance loss",
     )
+    parser.add_argument(
+        "--base_momentum",
+        type=float,
+        default=0.99,
+        help="base momentum for momentum scheduler",
+    )
     return parser.parse_args()
 
 
@@ -233,6 +239,7 @@ def main(rank, world_size, args):
     options.num_steps_per_epoch = options.num_jets // options.batch_size
     options.cov_loss_weight = args.cov_loss_weight
     options.var_loss_weight = args.var_loss_weight
+    options.base_momentum = args.base_momentum
 
     setup_logging(rank, args.output_dir)
     logger.info(f"Initialized (rank/world-size) {rank}/{world_size}")
@@ -242,6 +249,7 @@ def main(rank, world_size, args):
         logger.info("Using JetTransformer")
     logger.info(f"covariance loss weight: {options.cov_loss_weight}")
     logger.info(f"variance loss weight: {options.var_loss_weight}")
+    logger.info(f"base momentum: {options.base_momentum}")
 
     model = JJEPA(options).to(device)
     model = model.to(dtype=torch.float32)
