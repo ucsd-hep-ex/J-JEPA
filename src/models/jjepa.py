@@ -154,15 +154,13 @@ class JetsTransformer(nn.Module):
 
         print("num_particles", options.num_particles)
         print("num_part_ftr", options.num_part_ftr)
-        
-        self.particle_emb = create_embedding_layers(
-            options, options.num_part_ftr
-        )
 
-        options.repr_dim        = options.emb_dim
-        options.attn_dim        = options.repr_dim
-        options.in_features     = options.repr_dim
-        options.out_features    = options.repr_dim
+        self.particle_emb = create_embedding_layers(options, options.num_part_ftr)
+
+        options.repr_dim = options.emb_dim
+        options.attn_dim = options.repr_dim
+        options.in_features = options.repr_dim
+        options.out_features = options.repr_dim
         self.blocks = nn.ModuleList(
             [Block(options=options) for _ in range(options.encoder_depth)]
         )
@@ -183,13 +181,13 @@ class JetsTransformer(nn.Module):
             print(f"JetsTransformer forward pass with input shape: {x.shape}")
 
         B, N, F = x.shape
-        
+
         # Reshape x to (B*N, F) for particle embedding
-        x = x.view(B*N, F)
-        
+        x = x.view(B * N, F)
+
         # Embed each particle
         x = self.particle_emb(x)
-        
+
         # Reshape back to (B, N, embed_dim)
         x = x.view(B, N, -1)
 
@@ -207,10 +205,10 @@ class JetsTransformer(nn.Module):
             # Convert split_mask to boolean if it's not already
             if split_mask.dtype != torch.bool:
                 split_mask = split_mask.bool()
-            
+
             # Apply split mask to select specific particles
             x = x[split_mask]
-            
+
             # Reshape to (B, num_selected, embed_dim)
             num_selected = split_mask.sum(dim=1).min().item()
             x = x.view(B, num_selected, -1)
@@ -259,13 +257,15 @@ class JetsTransformerPredictor(nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
-    def forward(self, context_repr, context_mask, target_mask, context_p4=None, target_p4=None):
+    def forward(
+        self, context_repr, context_mask, target_mask, context_p4=None, target_p4=None
+    ):
         if self.options.debug:
             print(f"JetsTransformerPredictor forward pass")
             print(f"  context_repr shape: {context_repr.shape}")
             print(f"  context_mask shape: {context_mask.shape}")
             print(f"  target_mask shape: {target_mask.shape}")
-        
+
         x = self.predictor_embed(context_repr)
 
         B, N_ctxt, D = x.shape
@@ -285,7 +285,7 @@ class JetsTransformerPredictor(nn.Module):
 
         # Create full particle mask
         full_mask = torch.cat([context_mask, target_mask], dim=1)
-        
+
         if self.options.debug:
             print(f"  After concatenation:")
             print(f"    x shape: {x.shape}")
@@ -293,8 +293,12 @@ class JetsTransformerPredictor(nn.Module):
 
         # Ensure the full_mask matches the input sequence length
         if full_mask.shape[1] != x.shape[1]:
-            print(f"Warning: Mask shape mismatch. Adjusting mask from {full_mask.shape} to match input {x.shape}")
-            full_mask = F.pad(full_mask, (0, x.shape[1] - full_mask.shape[1]), value=False)
+            print(
+                f"Warning: Mask shape mismatch. Adjusting mask from {full_mask.shape} to match input {x.shape}"
+            )
+            full_mask = F.pad(
+                full_mask, (0, x.shape[1] - full_mask.shape[1]), value=False
+            )
 
         # Pass through predictor blocks
         for blk in self.predictor_blocks:
@@ -311,24 +315,25 @@ class JetsTransformerPredictor(nn.Module):
 
         return x
 
+
 class JJEPA(nn.Module):
     def __init__(self, options: Options):
         super(JJEPA, self).__init__()
-        self.options = options 
+        self.options = options
         if self.options.debug:
             print("Initializing JJEPA module")
         self.use_predictor = options.use_predictor
         self.use_parT = options.use_parT
-        
+
         if self.use_parT:
             self.context_transformer = ParTEncoder(options=options)
         else:
             self.context_transformer = JetsTransformer(options)
-        
+
         self.target_transformer = copy.deepcopy(self.context_transformer)
         for param in self.target_transformer.parameters():
             param.requires_grad = False
-        
+
         if self.use_predictor:
             if self.use_parT:
                 self.predictor_transformer = ParTPredictor(options=options)
@@ -349,27 +354,48 @@ class JJEPA(nn.Module):
             print(f"Context particle mask shape: {context['particle_mask'].shape}")
             print(f"Target particle mask shape: {target['particle_mask'].shape}")
             print(f"Full jet particle mask shape: {full_jet['particle_mask'].shape}")
-        
-        context_split_mask = context["split_mask"].bool() if context["split_mask"] is not None else None
-        target_split_mask = target["split_mask"].bool() if target["split_mask"] is not None else None
-        
-        context_repr = self.context_transformer(
-            full_jet["p4"], full_jet["particle_mask"], context_split_mask
+
+        context_split_mask = (
+            context["split_mask"].bool() if context["split_mask"] is not None else None
         )
+        target_split_mask = (
+            target["split_mask"].bool() if target["split_mask"] is not None else None
+        )
+
+        if self.use_parT:
+            context_repr = self.context_transformer(
+                full_jet["p4"],
+                full_jet["p4_spatial"],
+                full_jet["particle_mask"],
+                context_split_mask,
+            )
+            target_repr = self.target_transformer(
+                full_jet["p4"],
+                full_jet["p4_spatial"],
+                full_jet["particle_mask"],
+                target_split_mask,
+            )
+        else:
+            context_repr = self.context_transformer(
+                full_jet["p4"], full_jet["particle_mask"], context_split_mask
+            )
+            target_repr = self.target_transformer(
+                full_jet["p4"], full_jet["particle_mask"], target_split_mask
+            )
         if self.options.debug:
             print(f"Context repr shape: {context_repr.shape}")
-
-        target_repr = self.target_transformer(
-            full_jet["p4"], full_jet["particle_mask"], target_split_mask
-        )
-        if self.options.debug:
             print(f"Target repr shape: {target_repr.shape}")
 
         if self.use_predictor:
+            # pred_repr = self.predictor_transformer(
+            #     context_repr, context["particle_mask"], target["particle_mask"]
+            # )
             pred_repr = self.predictor_transformer(
                 context_repr,
                 context["particle_mask"],
-                target["particle_mask"]
+                target["particle_mask"],
+                target["p4_spatial"],
+                context["p4_spatial"],
             )
             if self.options.debug:
                 pred_repr = self.predictor_check(pred_repr)
