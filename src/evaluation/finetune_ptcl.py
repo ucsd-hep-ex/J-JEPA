@@ -187,6 +187,8 @@ def main(args):
     # initialise the network
     model = load_model(logfile, options, args.load_jjepa_path, args.device)
     net = model.target_transformer
+    for param in net.parameters():
+        param.requires_grad = True
 
     # initialize the MLP projector
     finetune_mlp_dim = args.output_dim
