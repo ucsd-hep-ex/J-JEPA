@@ -1,6 +1,6 @@
 {
     "activation": "gelu",
-    "base_momentum": 0.99,
+    "base_momentum": 0.5,
     "batch_size": 64,
     "checkpoint_freq": 10,
     "debug": false,
