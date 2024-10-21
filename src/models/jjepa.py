@@ -362,26 +362,26 @@ class JJEPA(nn.Module):
             target["split_mask"].bool() if target["split_mask"] is not None else None
         )
 
-        if self.use_parT:
-            context_repr = self.context_transformer(
-                full_jet["p4"],
-                full_jet["p4_spatial"],
-                full_jet["particle_mask"],
-                context_split_mask,
-            )
-            target_repr = self.target_transformer(
-                full_jet["p4"],
-                full_jet["p4_spatial"],
-                full_jet["particle_mask"],
-                target_split_mask,
-            )
-        else:
-            context_repr = self.context_transformer(
-                full_jet["p4"], full_jet["particle_mask"], context_split_mask
-            )
-            target_repr = self.target_transformer(
-                full_jet["p4"], full_jet["particle_mask"], target_split_mask
-            )
+        # if self.use_parT:
+        context_repr = self.context_transformer(
+            full_jet["p4"],
+            full_jet["p4_spatial"],
+            full_jet["particle_mask"],
+            context_split_mask,
+        )
+        target_repr = self.target_transformer(
+            full_jet["p4"],
+            full_jet["p4_spatial"],
+            full_jet["particle_mask"],
+            target_split_mask,
+        )
+        # else:
+        #     context_repr = self.context_transformer(
+        #         full_jet["p4"], full_jet["particle_mask"], context_split_mask
+        #     )
+        #     target_repr = self.target_transformer(
+        #         full_jet["p4"], full_jet["particle_mask"], target_split_mask
+        #     )
         if self.options.debug:
             print(f"Context repr shape: {context_repr.shape}")
             print(f"Target repr shape: {target_repr.shape}")
