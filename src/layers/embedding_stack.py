@@ -446,6 +446,7 @@ class PlainAttentionEmbeddingStack(nn.Module):
         repr = self.fc2(repr)
         repr = self.drop(repr)
 
-        token = self.softmax(repr)
+        # token = self.softmax(repr)
+        token = repr
 
         return token
