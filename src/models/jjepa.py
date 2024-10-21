@@ -334,11 +334,11 @@ class JJEPA(nn.Module):
         for param in self.target_transformer.parameters():
             param.requires_grad = False
 
-        if self.use_predictor:
-            # if self.use_parT:
-            self.predictor_transformer = ParTPredictor(options=options)
-            # else:
-            # self.predictor_transformer = JetsTransformerPredictor(options)
+        # if self.use_predictor:
+        # if self.use_parT:
+        self.predictor_transformer = ParTPredictor(options=options)
+        # else:
+        # self.predictor_transformer = JetsTransformerPredictor(options)
 
         if self.options.debug:
             self.input_check = DimensionCheckLayer("Model Input", 3)
