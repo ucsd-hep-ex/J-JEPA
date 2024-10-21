@@ -76,7 +76,7 @@ def adjust_state_dict(saved_state_dict):
     return adjusted_state_dict
 
 
-def load_model(options, model_path=None, device="cpu", old=False):
+def load_model(logfile, options, model_path=None, device="cpu", old=False):
     model = JJEPA(options).to(device)
     if model_path:
         # Load the saved state_dict
@@ -87,8 +87,10 @@ def load_model(options, model_path=None, device="cpu", old=False):
             model.load_state_dict(adjusted_state_dict)
         else:
             model.load_state_dict(saved_state_dict)
-
-    print(model)
+        print(f"Loaded model from {model_path}", file=logfile, flush=True)
+    else:
+        print("No model path provided, training from scratch", file=logfile, flush=True)
+    print(model, file=logfile, flush=True)
     return model
 
 
@@ -217,7 +219,9 @@ def main(args):
     )
 
     # initialise the network
-    model = load_model(options, args.load_jjepa_path, args.device, old=args.old)
+    model = load_model(
+        logfile, options, args.load_jjepa_path, args.device, old=args.old
+    )
     net = model.target_transformer
 
     for param in net.parameters():
