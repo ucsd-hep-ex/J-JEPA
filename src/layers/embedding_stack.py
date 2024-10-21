@@ -400,7 +400,7 @@ class PlainAttentionEmbeddingStack(nn.Module):
                                         input_dim=options.particle_emb_dim,
                                         output_dim=options.particle_emb_dim,
                                         n_heads=options.num_heads_in_subjet_embedding_blocks,
-                                    ) for _ in range(options.num_particle_attention_blocks_in_embedding)]
+                                    ) for _ in range(options.num_class_attention_blocks_in_embedding)]
 
         return part_att_blks
 
