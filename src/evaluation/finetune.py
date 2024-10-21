@@ -60,10 +60,37 @@ def load_data(dataset_path, tag=None):
     return dataloader
 
 
+def adjust_state_dict(saved_state_dict):
+    adjusted_state_dict = {}
+    for k, v in saved_state_dict.items():
+        # Map 'attn.proj' to 'attn.multihead_attn.out_proj'
+        if "attn.proj.weight" in k:
+            new_key = k.replace(
+                "attn.proj.weight", "attn.multihead_attn.out_proj.weight"
+            )
+        elif "attn.proj.bias" in k:
+            new_key = k.replace("attn.proj.bias", "attn.multihead_attn.out_proj.bias")
+        else:
+            new_key = k
+        adjusted_state_dict[new_key] = v
+    return adjusted_state_dict
+
+
 def load_model(options, model_path=None, device="cpu"):
     model = JJEPA(options).to(device)
     if model_path:
-        model.load_state_dict(torch.load(model_path, map_location=device))
+        # Load the saved state_dict
+        saved_state_dict = torch.load(model_path, map_location=device)
+
+        # Adjust the keys
+        adjusted_state_dict = adjust_state_dict(saved_state_dict)
+
+        # print("Saved model keys:", adjusted_state_dict.keys())
+        # print("Current model keys:", model.state_dict().keys())
+
+        # Load the adjusted state_dict into the model
+        model.load_state_dict(adjusted_state_dict)
+
     print(model)
     return model
 
@@ -129,16 +156,23 @@ def main(args):
 
     # check if experiment already exists and is not empty
 
-    if os.path.isdir(out_dir) and os.listdir(out_dir):
-        sys.exit(
-            "ERROR: experiment already exists and is not empty, don't want to overwrite it by mistake"
-        )
-    else:
+    if os.path.isdir(out_dir):
+        # List all items in the directory
+        contents = os.listdir(out_dir)
+
+        # Filter out log files
+        non_log_files = [file for file in contents if file.endswith(".pth")]
+
+        # Check if there are files other than log files
+        if non_log_files:
+            sys.exit(
+                "ERROR: experiment already exists and contains files other than log files; don't want to overwrite it by mistake"
+            )
         # This will create the directory if it does not exist or if it is empty
-        os.makedirs(out_dir, exist_ok=True)
+    os.makedirs(out_dir, exist_ok=True)
 
     # initialise logfile
-    args.logfile = out_dir + "logfile.txt"
+    args.logfile = f"{out_dir}/logfile.txt"
     logfile = open(args.logfile, "a")
     print("logfile initialised", file=logfile, flush=True)
     if args.flatten:
@@ -326,26 +360,22 @@ def main(args):
 
         # save the latest model
         if args.finetune:
-            torch.save(net.state_dict(), out_dir + "jjepa_finetune_last" + ".pt")
-        torch.save(proj.state_dict(), out_dir + "projector_finetune_last" + ".pt")
+            torch.save(net.state_dict(), f"{out_dir}/jjepa_finetune_last.pt")
+        torch.save(proj.state_dict(), f"{out_dir}/projector_finetune_last.pt")
 
         # save the model if lowest val loss is achieved
         if loss_val_all[-1] < l_val_best:
             # print("new lowest val loss", flush=True, file=logfile)
             l_val_best = loss_val_all[-1]
             if args.finetune:
-                torch.save(
-                    net.state_dict(), out_dir + "jjepa_finetune_best_loss" + ".pt"
-                )
-            torch.save(
-                proj.state_dict(), out_dir + "projector_finetune_best_loss" + ".pt"
-            )
+                torch.save(net.state_dict(), f"{out_dir}/jjepa_finetune_best_loss.pt")
+            torch.save(proj.state_dict(), f"{out_dir}/projector_finetune_best_loss.pt")
             np.save(
-                f"{out_dir}validation_target_vals_loss.npy",
+                f"{out_dir}/validation_target_vals_loss.npy",
                 target,
             )
             np.save(
-                f"{out_dir}validation_predicted_vals_loss.npy",
+                f"{out_dir}/validation_predicted_vals_loss.npy",
                 predicted,
             )
         # also save the model if highest val accuracy is achieved
@@ -353,18 +383,14 @@ def main(args):
             print("new highest val accuracy", flush=True, file=logfile)
             acc_val_best = acc_val_all[-1]
             if args.finetune:
-                torch.save(
-                    net.state_dict(), out_dir + "jjepa_finetune_best_acc" + ".pt"
-                )
-            torch.save(
-                proj.state_dict(), out_dir + "projector_finetune_best_acc" + ".pt"
-            )
+                torch.save(net.state_dict(), f"{out_dir}/jjepa_finetune_best_acc.pt")
+            torch.save(proj.state_dict(), f"{out_dir}/projector_finetune_best_acc.pt")
             np.save(
-                f"{out_dir}validation_target_vals_acc.npy",
+                f"{out_dir}/validation_target_vals_acc.npy",
                 target,
             )
             np.save(
-                f"{out_dir}validation_predicted_vals_acc.npy",
+                f"{out_dir}/validation_predicted_vals_acc.npy",
                 predicted,
             )
         # calculate the AUC and imtafe and output to the logfile
@@ -380,32 +406,28 @@ def main(args):
 
             rej_val_best = imtafe
             if args.finetune:
-                torch.save(
-                    net.state_dict(), out_dir + "jjepa_finetune_best_rej" + ".pt"
-                )
-            torch.save(
-                proj.state_dict(), out_dir + "projector_finetune_best_rej" + ".pt"
-            )
+                torch.save(net.state_dict(), f"{out_dir}/jjepa_finetune_best_rej.pt")
+            torch.save(proj.state_dict(), f"{out_dir}/projector_finetune_best_rej.pt")
             np.save(
-                f"{out_dir}validation_target_vals_rej.npy",
+                f"{out_dir}/validation_target_vals_rej.npy",
                 target,
             )
             np.save(
-                f"{out_dir}validation_predicted_vals_rej.npy",
+                f"{out_dir}/validation_predicted_vals_rej.npy",
                 predicted,
             )
 
         # save all losses and accuracies
         np.save(
-            f"{out_dir}loss_train.npy",
+            f"{out_dir}/loss_train.npy",
             np.array(loss_train_all),
         )
         np.save(
-            f"{out_dir}loss_val.npy",
+            f"{out_dir}/loss_val.npy",
             np.array(loss_val_all),
         )
         np.save(
-            f"{out_dir}acc_val.npy",
+            f"{out_dir}/acc_val.npy",
             np.array(acc_val_all),
         )
         te_end = time.time()
