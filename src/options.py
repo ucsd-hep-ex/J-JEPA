@@ -12,25 +12,30 @@ class Options(Namespace):
         testing_file: str = "",
     ):
         super(Options, self).__init__()
+        # =========================================================================================
+        # Particle training specific parameters
+        # =========================================================================================
+        # percentage of particles to use as target
+        self.trgt_ratio: float = 0.3
+
+        # maximum number of targets per jet
+        self.max_targets: int = 21
 
         # =========================================================================================
         # Dataset Structure
         # =========================================================================================
-        # Top level of the .h5 dataset is jet
-        # number of subjets per jet
-        self.num_subjets: int = 20
-
-        # number of particles per jet
-        self.num_particles: int = 30
 
         # number of particle features per particle
         self.num_part_ftr: int = 4
-
-        self.input_dim: int = self.num_particles * self.num_part_ftr
+        self.num_particles: int = 30
+        
 
         # =========================================================================================
         # Network Architecture
         # =========================================================================================
+
+        # Whether to use the particle transformer encoder
+        self.use_parT: bool = True
 
         # Use predictor
         self.use_predictor: bool = True
@@ -51,8 +56,8 @@ class Options(Namespace):
 
         # later embedding layers
         # embedding dimension size
-        self.emb_dim: int = 1024
-        self.predictor_emb_dim = 512
+        self.emb_dim: int = 64
+        self.predictor_emb_dim: int = 512
 
         # whether to add skip connections to the later embedding layers
         self.embedding_skip_connections: bool = True
@@ -134,6 +139,42 @@ class Options(Namespace):
         self.normalization: str = "LayerNorm"
 
         # =========================================================================================
+        # ParTEncoder specific parameters
+        # =========================================================================================
+
+        # projector MLP params, None -> no projector after attention layers.
+        # Format: [(out_dim, drop_rate) for layer in range(num_layers)]
+        self.fc_params: list = None
+
+        # parameters for class attention blocks (used for aggregating ptcl features into jet features)
+        self.cls_block_params: dict = {
+            "dropout": 0,
+            "attn_dropout": 0,
+            "activation_dropout": 0,
+        }
+
+        # parameters for attention blocks
+        self.block_params: list = None
+
+        # number of class attention blocks (used for aggregating ptcl features into jet features)
+        self.num_cls_layers: int = 0
+
+        # number of input dimensions for pair embedding
+        self.pair_input_dim: int = 4
+
+        # embedding dimensions for pair embedding blocks
+        self.pair_embed_dims = [64, 64, 64]
+
+        # embedding dimensions for the transformer layers
+        self.embed_dims = [128, 512, 128]
+
+        # embedding dimensions for the predictor
+        self.predictor_embed_dims = [64, 64, 64]
+
+        # input dim for particles (default 4: deta, dphi, pt_log, e_log)
+        self.input_dim: int = 4
+
+        # =========================================================================================
         # JJEPA specific parameters
         # =========================================================================================
         # Number of attention heads in the multi-head attention layers
@@ -161,6 +202,9 @@ class Options(Namespace):
         # Note that this is a dynamic variable
         # depending on where you create the attention block
         self.repr_dim: int = -1
+
+        # Whether to use positional embeddings in the encoder
+        self.encoder_pos_emb: bool = True
 
         # =========================================================================================
         # Optimizer Parameters
@@ -257,7 +301,7 @@ class Options(Namespace):
         self.base_momentum: float = 0.99
 
         # max grad norm
-        self.max_grad_norm: float = 0.1
+        self.max_grad_norm: float = 0.0
 
         # number of steps per epoch
         self.num_steps_per_epoch: int = None
@@ -332,12 +376,14 @@ class Options(Namespace):
     def update(self, filepath: str):
         with open(filepath, "r") as json_file:
             self.update_options(json.load(json_file))
+        self.embed_dims[-1] = self.emb_dim
 
     @classmethod
     def load(cls, filepath: str):
         options = cls()
         with open(filepath, "r") as json_file:
             options.update_options(json.load(json_file))
+            options.embed_dims[-1] = options.emb_dim
         return options
 
     def save(self, filepath: str):

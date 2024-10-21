@@ -11,6 +11,8 @@ from src.options import Options
 from src.util.tensors import trunc_normal_
 from src.util.DimensionCheckLayer import DimensionCheckLayer
 
+from src.models.ParT.ParticleTransformerEncoder import ParTEncoder, ParTPredictor
+
 # A dictionary for normalization layers
 NORM_LAYERS = {
     "None": None,
@@ -150,12 +152,10 @@ class JetsTransformer(nn.Module):
         self.embed_dim = options.emb_dim
         self.calc_pos_emb = create_pos_emb_fn(options, options.emb_dim)
 
-        # Adjust the input dimensions based on the new input shape
         print("num_particles", options.num_particles)
         print("num_part_ftr", options.num_part_ftr)
-        self.subjet_emb = create_embedding_layers(
-            options, options.num_particles * options.num_part_ftr
-        )
+
+        self.particle_emb = create_embedding_layers(options, options.num_part_ftr)
 
         options.repr_dim = options.emb_dim
         options.attn_dim = options.repr_dim
@@ -176,64 +176,48 @@ class JetsTransformer(nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
-    # def forward(self, x, subjet_masks, subjets_meta, split_mask):
-    #     """
-    #     Inputs:
-    #         x: particles of subjets
-    #             shape: [B, N_sj, N_part * N_part_ftr]
-    #         subjet_meta: 4 vec of subjets
-    #             shape: [B, N_sj, N_sj_ftr=5]
-    #             N_sj_ftr: pt, eta, phi, E, num_part
-    #         split_mask: mask out certain subjet representations, depending on context/target
-    #             shape: [B, N_sj_to_keep]
-    #     Return:
-    #         subjet representations
-    #             shape: [B, N_sj, emb_dim]
-    #     """
-    #     # Flatten last two dimensions to [B, SJ, P*DP]
-    #     x = x["particles"]
-    #     B, SJ, _ = x.shape
-    #     x = x.view(B, SJ, -1)
+    def forward(self, x, particle_masks, split_mask):
+        if self.options.debug:
+            print(f"JetsTransformer forward pass with input shape: {x.shape}")
 
-    #     # subjet emb
-    #     x = self.subjet_emb(x)
+        B, N, F = x.shape
 
-    #     # pos emb
-    #     pos_emb = self.calc_pos_emb(subjets_meta)
-    #     if self.options.debug:
-    #         print(pos_emb.shape)
-    #     x += pos_emb
+        # Reshape x to (B*N, F) for particle embedding
+        x = x.view(B * N, F)
 
-    #     # forward prop
-    #     for blk in self.blocks:
-    #         x = blk(x, subjet_masks)
-
-    #     # norm
-    #     x = self.norm(x)
-    #     if split_mask != None:
-    #         # select indices of certain subjet representations from split_mask
-    #         selected_subjets = x[split_mask.unsqueeze(-1).expand(-1, -1, x.shape[-1])]
-
-    #         num_selected = split_mask.sum(
-    #             dim=1
-    #         ).min()  # Minimum to handle potentially non-uniform selections
-    #         selected_subjets = selected_subjets.view(B, num_selected, x.shape[-1])
-    #         return selected_subjets
-    #     return x
-
-    def forward(self, x, particle_masks):
-        B, N, _ = x.shape
+        # Embed each particle
         x = self.particle_emb(x)
 
-        # positional embedding for particles
-        pos_emb = self.calc_pos_emb(x)
-        x += pos_emb
+        # Reshape back to (B, N, embed_dim)
+        x = x.view(B, N, -1)
 
+        # Add positional embeddings
+        pos_emb = self.calc_pos_emb(x)
+        x = x + pos_emb
+
+        # Pass through transformer blocks
         for blk in self.blocks:
             x = blk(x, particle_masks)
 
         x = self.norm(x)
+
+        if split_mask is not None:
+            # Convert split_mask to boolean if it's not already
+            if split_mask.dtype != torch.bool:
+                split_mask = split_mask.bool()
+
+            # Apply split mask to select specific particles
+            x = x[split_mask]
+
+            # Reshape to (B, num_selected, embed_dim)
+            num_selected = split_mask.sum(dim=1).min().item()
+            x = x.view(B, num_selected, -1)
+
+        if self.options.debug:
+            print(f"JetsTransformer output shape: {x.shape}")
+
         return x
+
 
 class JetsTransformerPredictor(nn.Module):
     def __init__(self, options: Options):
@@ -249,7 +233,6 @@ class JetsTransformerPredictor(nn.Module):
         self.calc_predictor_pos_emb = create_pos_emb_fn(
             options, options.predictor_emb_dim
         )
-
         options.repr_dim = options.predictor_emb_dim
         options.attn_dim = options.repr_dim
         options.in_features = options.repr_dim
@@ -257,11 +240,10 @@ class JetsTransformerPredictor(nn.Module):
         self.predictor_blocks = nn.ModuleList(
             [Block(options=options) for _ in range(options.pred_depth)]
         )
-
         self.predictor_norm = norm_layer(options.predictor_emb_dim)
         self.predictor_proj = nn.Linear(
             options.predictor_emb_dim, options.emb_dim, bias=True
-        )  # Match target dimensions
+        )
         self.apply(self._init_weights)
         self.mask_token = nn.Parameter(torch.zeros(1, 1, options.predictor_emb_dim))
         trunc_normal_(self.mask_token, std=self.init_std)
@@ -275,62 +257,63 @@ class JetsTransformerPredictor(nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
-    def forward(self, x, subjet_masks, target_subjet_ftrs, context_subjet_ftrs):
-        """
-        Inputs:
-            x: context subjet representations
-                shape: [B, N_ctxt, emb_dim]
-            subjet_mask: mask for zero-padded subjets
-                shape: [B, N_ctxt]
-            target_subjet_ftrs: target subjet features
-                shape: [B, N_trgt, N_ftr]
-            context_subjet_ftrs: context subjet features
-                shape: [B, N_ctxt, N_ftr]
-        Output:
-            predicted target subjet representations
-                shape: [B, N_trgt, predictor_output_dim]
-        """
+    def forward(
+        self, context_repr, context_mask, target_mask, context_p4=None, target_p4=None
+    ):
         if self.options.debug:
-            print(f"JetsTransformerPredictor forward pass with input shape: {x.shape}")
-        # calcualte context positional embedding
-        x = self.predictor_embed(x)
-        x += self.calc_predictor_pos_emb(context_subjet_ftrs)
+            print(f"JetsTransformerPredictor forward pass")
+            print(f"  context_repr shape: {context_repr.shape}")
+            print(f"  context_mask shape: {context_mask.shape}")
+            print(f"  target_mask shape: {target_mask.shape}")
+
+        x = self.predictor_embed(context_repr)
 
         B, N_ctxt, D = x.shape
-        _, N_trgt, _ = target_subjet_ftrs.shape
-        # prepare position embeddings for target subjets
-        # (B, N_trgt, N_ftr) -> (B, N_trgt, D)
-        trgt_pos_emb = self.calc_predictor_pos_emb(target_subjet_ftrs)
-        assert trgt_pos_emb.shape[2] == D
-        # (B, N_trgt, D) -> (B*N_trgt, 1, D) following FAIR_src
-        trgt_pos_emb = trgt_pos_emb.view(B * N_trgt, 1, D)
-        # TODO: add an learnable token
-        pred_token = self.mask_token.repeat(
-            trgt_pos_emb.size(0), trgt_pos_emb.size(1), 1
-        )
-        pred_token += trgt_pos_emb
+        N_trgt = target_mask.shape[1]
 
-        # (B, N_ctxt, D) -> (B * N_trgt, N_ctxt, D)
-        x = x.repeat(N_trgt, 1, 1)
+        # Create prediction tokens for target particles
+        pred_token = self.mask_token.expand(B, N_trgt, -1)
 
-        x = torch.cat([x, pred_token], axis=1)
+        # Concatenate context representations and prediction tokens
+        x = torch.cat([x, pred_token], dim=1)
 
-        subjet_masks = torch.cat(
-            [subjet_masks, torch.ones((B, 1)).to(subjet_masks.device)], axis=1
-        )
+        # Add positional embeddings
+        if context_p4 is not None and target_p4 is not None:
+            full_p4 = torch.cat([context_p4, target_p4], dim=1)
+            pos_emb = self.calc_predictor_pos_emb(full_p4)
+            x = x + pos_emb
 
-        subjet_masks = subjet_masks.repeat(N_trgt, 1)
+        # Create full particle mask
+        full_mask = torch.cat([context_mask, target_mask], dim=1)
 
+        if self.options.debug:
+            print(f"  After concatenation:")
+            print(f"    x shape: {x.shape}")
+            print(f"    full_mask shape: {full_mask.shape}")
+
+        # Ensure the full_mask matches the input sequence length
+        if full_mask.shape[1] != x.shape[1]:
+            print(
+                f"Warning: Mask shape mismatch. Adjusting mask from {full_mask.shape} to match input {x.shape}"
+            )
+            full_mask = F.pad(
+                full_mask, (0, x.shape[1] - full_mask.shape[1]), value=False
+            )
+
+        # Pass through predictor blocks
         for blk in self.predictor_blocks:
-            x = blk(x, subjet_masks)
+            x = blk(x, full_mask)
+
         x = self.predictor_norm(x)
 
-        # -- return the preds for target subjets
+        # Return the predictions for target particles
         x = x[:, N_ctxt:, :]
         x = self.predictor_proj(x)
+
         if self.options.debug:
             print(f"JetsTransformerPredictor output shape: {x.shape}")
-        return x.view(B, N_trgt, -1)
+
+        return x
 
 
 class JJEPA(nn.Module):
@@ -340,72 +323,92 @@ class JJEPA(nn.Module):
         if self.options.debug:
             print("Initializing JJEPA module")
         self.use_predictor = options.use_predictor
-        self.context_transformer = JetsTransformer(options)
+        self.use_parT = options.use_parT
+
+        if self.use_parT:
+            self.context_transformer = ParTEncoder(options=options)
+        else:
+            self.context_transformer = JetsTransformer(options)
+
         self.target_transformer = copy.deepcopy(self.context_transformer)
         for param in self.target_transformer.parameters():
             param.requires_grad = False
-        if self.use_predictor:
-            self.predictor_transformer = JetsTransformerPredictor(options)
 
-        # Debug Statement
+        if self.use_predictor:
+            if self.use_parT:
+                self.predictor_transformer = ParTPredictor(options=options)
+            else:
+                self.predictor_transformer = JetsTransformerPredictor(options)
+
         if self.options.debug:
             self.input_check = DimensionCheckLayer("Model Input", 3)
             self.context_check = DimensionCheckLayer("After Context Transformer", 3)
             self.predictor_check = DimensionCheckLayer("After Predictor", 3)
 
-    """
-    context = {
-        subjets: torch.Tensor,
-        particle_mask: torch.Tensor,
-        subjet_mask: torch.Tensor,
-        split_mask: torch.Tensor,
-    }
-    target = {
-        subjets: torch.Tensor,
-        particle_mask: torch.Tensor,
-        subjet_mask: torch.Tensor,
-        split_mask: torch.Tensor,
-    }
-    full_jet = {
-        particles: torch.Tensor,
-        particle_mask: torch.Tensor,
-        subjet_mask: torch.Tensor,
-    }
-    """
-
     def forward(self, context, target, full_jet):
         if self.options.debug:
             print(f"JJEPA forward pass")
-        context_repr = self.context_transformer(
-            full_jet,
-            full_jet["subjet_mask"],
-            full_jet["subjets"],
-            context["split_mask"],
+            print(f"Context shape: {context['p4_spatial'].shape}")
+            print(f"Target shape: {target['p4_spatial'].shape}")
+            print(f"Full jet shape: {full_jet['p4'].shape}")
+            print(f"Context particle mask shape: {context['particle_mask'].shape}")
+            print(f"Target particle mask shape: {target['particle_mask'].shape}")
+            print(f"Full jet particle mask shape: {full_jet['particle_mask'].shape}")
+
+        context_split_mask = (
+            context["split_mask"].bool() if context["split_mask"] is not None else None
         )
-        # Debug Statement
+        target_split_mask = (
+            target["split_mask"].bool() if target["split_mask"] is not None else None
+        )
+
+        if self.use_parT:
+            context_repr = self.context_transformer(
+                full_jet["p4"],
+                full_jet["p4_spatial"],
+                full_jet["particle_mask"],
+                context_split_mask,
+            )
+            target_repr = self.target_transformer(
+                full_jet["p4"],
+                full_jet["p4_spatial"],
+                full_jet["particle_mask"],
+                target_split_mask,
+            )
+        else:
+            context_repr = self.context_transformer(
+                full_jet["p4"], full_jet["particle_mask"], context_split_mask
+            )
+            target_repr = self.target_transformer(
+                full_jet["p4"], full_jet["particle_mask"], target_split_mask
+            )
         if self.options.debug:
-            context_repr = self.context_check(context_repr)
-        target_repr = self.target_transformer(
-            full_jet, full_jet["subjet_mask"], full_jet["subjets"], target["split_mask"]
-        )
+            print(f"Context repr shape: {context_repr.shape}")
+            print(f"Target repr shape: {target_repr.shape}")
+
         if self.use_predictor:
-            # TODO: update the input to the model x, subjet_mask, target_subjet_ftrs, context_subjet_ftrs):
+            # pred_repr = self.predictor_transformer(
+            #     context_repr, context["particle_mask"], target["particle_mask"]
+            # )
             pred_repr = self.predictor_transformer(
                 context_repr,
-                context["subjet_mask"],
-                target["subjets"],
-                context["subjets"],
+                context["particle_mask"],
+                target["particle_mask"],
+                target["p4"],
+                context["p4"],
             )
             if self.options.debug:
                 pred_repr = self.predictor_check(pred_repr)
+                print(f"Predictor output shape: {pred_repr.shape}")
+        else:
+            pred_repr = None
             if self.options.debug:
-                print(
-                    f"JJEPA output - pred_repr shape: {pred_repr.shape}, context_repr shape: {context_repr.shape}"
-                )
-            return pred_repr, target_repr, context_repr
+                print("Predictor not used in forward pass")
 
         if self.options.debug:
-            print(
-                f"JJEPA output - context_repr shape: {context_repr.shape}, target shape: {target_repr.shape}"
-            )
-        return context_repr, target_repr
+            print(f"JJEPA output shapes:")
+            print(f"  pred_repr: {pred_repr.shape if pred_repr is not None else None}")
+            print(f"  target_repr: {target_repr.shape}")
+            print(f"  context_repr: {context_repr.shape}")
+
+        return pred_repr, target_repr, context_repr
