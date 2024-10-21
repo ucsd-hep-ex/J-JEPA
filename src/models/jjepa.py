@@ -326,9 +326,9 @@ class JJEPA(nn.Module):
         self.use_parT = options.use_parT
 
         # if self.use_parT:
-        #     self.context_transformer = ParTEncoder(options=options)
+        self.context_transformer = ParTEncoder(options=options)
         # else:
-        self.context_transformer = JetsTransformer(options)
+        # self.context_transformer = JetsTransformer(options)
 
         self.target_transformer = copy.deepcopy(self.context_transformer)
         for param in self.target_transformer.parameters():
