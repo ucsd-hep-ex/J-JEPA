@@ -23,6 +23,7 @@ if __name__ == "__main__":
 
 
     emb = PlainAttentionEmbeddingStack(options, N_part_ftr)
+    print(emb)
 
     # set a pseudo input
     # of shape (bs, N_sj, N_part, N_part_ftr)
