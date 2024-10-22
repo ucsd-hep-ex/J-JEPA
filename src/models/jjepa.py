@@ -345,7 +345,7 @@ class JJEPA(nn.Module):
             self.context_check = DimensionCheckLayer("After Context Transformer", 3)
             self.predictor_check = DimensionCheckLayer("After Predictor", 3)
 
-    def forward(self, context, target, full_jet):
+    def forward(self, context, target, full_jet, stats):
         if self.options.debug:
             print(f"JJEPA forward pass")
             print(f"Context shape: {context['p4_spatial'].shape}")
@@ -368,19 +368,21 @@ class JJEPA(nn.Module):
                 full_jet["p4_spatial"],
                 full_jet["particle_mask"],
                 context_split_mask,
+                stats,
             )
             target_repr = self.target_transformer(
                 full_jet["p4"],
                 full_jet["p4_spatial"],
                 full_jet["particle_mask"],
                 target_split_mask,
+                stats,
             )
         else:
             context_repr = self.context_transformer(
-                full_jet["p4"], full_jet["particle_mask"], context_split_mask
+                full_jet["p4"], full_jet["particle_mask"], context_split_mask, stats
             )
             target_repr = self.target_transformer(
-                full_jet["p4"], full_jet["particle_mask"], target_split_mask
+                full_jet["p4"], full_jet["particle_mask"], target_split_mask, stats
             )
         if self.options.debug:
             print(f"Context repr shape: {context_repr.shape}")
@@ -396,6 +398,7 @@ class JJEPA(nn.Module):
                 target["particle_mask"],
                 target["p4"],
                 context["p4"],
+                stats,
             )
             if self.options.debug:
                 pred_repr = self.predictor_check(pred_repr)
