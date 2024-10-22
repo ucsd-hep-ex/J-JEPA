@@ -8,6 +8,33 @@ from src.layers import create_embedding_layers, create_predictor_embedding_layer
 from src.util.positional_embedding import create_space_pos_emb_fn
 
 
+def create_pos_emb_input(x, stats, mask):
+    """
+    Create the input to the positional embedding layer
+    Args:
+        x: input tensor of shape (B, N, 4) [eta, phi, log_pt, log_energy]
+        stats: dictionary of statistics for the input features
+        mask: mask tensor of shape (B, N) -- real particle = 1, padded = 0
+    Returns:
+        pos_emb_input: input tensor for the positional embedding layer
+                     last dimension: [pt, eta, phi, E]
+    """
+    pos_emb_input = torch.empty_like(x)
+    pos_emb_input[:, :, 0] = (
+        torch.exp(x[:, :, 2] * stats["part_pt_log"][1] + stats["part_pt_log"][0])
+    ) * mask
+    pos_emb_input[:, :, 1] = (
+        x[:, :, 0] * stats["part_deta"][1] + stats["part_deta"][0]
+    ) * mask
+    pos_emb_input[:, :, 2] = (
+        x[:, :, 1] * stats["part_dphi"][1] + stats["part_dphi"][0]
+    ) * mask
+    pos_emb_input[:, :, 3] = (
+        torch.exp(x[:, :, 3] * stats["part_e_log"][1] + stats["part_e_log"][0])
+    ) * mask
+    return pos_emb_input
+
+
 class ParTEncoder(nn.Module):
     def __init__(
         self,
@@ -102,18 +129,20 @@ class ParTEncoder(nn.Module):
             "cls_token",
         }
 
-    def forward(self, x, v=None, mask=None, split_mask=None, uu=None):
+    def forward(self, x, v=None, mask=None, split_mask=None, uu=None, stats=None):
         # new shapes:
         # x: (N, P, 4) [eta, phi, log_pt, log_energy]
         # v: (N, P, 4) [px,py,pz,energy]
         # mask: (N, P) -- real particle = 1, padded = 0
         # split_mask: (N, P) -- keep in output = 1, ignore in output = 0
+        # stats: dictionary of statistics for the input features
         # old shapes:
         # x: (N, C, P)
         # v: (N, 4, P) [px,py,pz,energy]
         # mask: (N, 1, P) -- real particle = 1, padded = 0
         # split_mask: (N, 1, P) -- keep in output = 1, ignore in output = 0
-        pos_emb_input = torch.clone(x)  # (N, P, 4)
+        pos_emb_input = create_pos_emb_input(x, stats, mask)  # (N, P, 4)
+
         v = v.transpose(1, 2) if v is not None else None  # (N, 4, P)
         mask = mask.bool()
         mask = mask.unsqueeze(1) if mask is not None else None  # (N, 1, P)
@@ -306,6 +335,7 @@ class ParTPredictor(nn.Module):
         trgt_particle_mask,
         target_particle_ftrs,
         context_particle_ftrs,
+        stats,
     ):
         """
         new inputs:
@@ -314,6 +344,7 @@ class ParTPredictor(nn.Module):
             trgt_particle_mask: (B,  N_trgt) -- real particle = 1, padded = 0
             target_particle_ftrs: (B, N_trgt, 4) [eta, phi, log_pt, log_energy]
             context_particle_ftrs: (B, N_ctxt, 4) [eta, phi, log_pt, log_energy]
+            stats: dictionary of statistics for the input features
 
         Old Inputs:
             x: context particle representations
@@ -337,14 +368,20 @@ class ParTPredictor(nn.Module):
             print(f"ParTPredictor forward pass with input shape: {x.shape}")
 
         x = self.embed(x)
-        pos_emb = self.calc_predictor_pos_emb(context_particle_ftrs)
+        ctxt_pos_emb_input = create_pos_emb_input(
+            context_particle_ftrs, stats, ctxt_particle_mask.squeeze(1)
+        )
+        pos_emb = self.calc_predictor_pos_emb(ctxt_pos_emb_input)
         x += pos_emb
 
         B, N_ctxt, D = x.shape
         _, N_trgt, _ = target_particle_ftrs.shape
 
         # Prepare position embeddings for target particles
-        trgt_pos_emb = self.calc_predictor_pos_emb(target_particle_ftrs)
+        trgt_pos_emb_input = create_pos_emb_input(
+            target_particle_ftrs, stats, trgt_particle_mask.squeeze(1)
+        )
+        trgt_pos_emb = self.calc_predictor_pos_emb(trgt_pos_emb_input)
         assert trgt_pos_emb.shape[2] == D
 
         # Create prediction tokens

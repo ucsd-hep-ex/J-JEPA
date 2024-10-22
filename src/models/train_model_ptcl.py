@@ -100,6 +100,7 @@ def setup_data_loader(args, options, data_path, world_size, rank, tag="train"):
     sampler = torch.utils.data.distributed.DistributedSampler(
         dataset, num_replicas=world_size, rank=rank, shuffle=True
     )
+    stats = dataset.stats
     shuffle = False if sampler is not None else (tag == "train")
     loader = DataLoader(
         dataset,
@@ -109,7 +110,7 @@ def setup_data_loader(args, options, data_path, world_size, rank, tag="train"):
         pin_memory=True,
         sampler=sampler,
     )
-    return loader, sampler, len(dataset)
+    return loader, sampler, len(dataset), stats
 
 
 def save_checkpoint(model, optimizer, epoch, loss_train, loss_val, output_dir):
@@ -294,10 +295,10 @@ def main(rank, world_size, args):
     if world_size > 1:
         model = DistributedDataParallel(model, device_ids=[rank])
 
-    train_loader, train_sampler, train_dataset_size = setup_data_loader(
+    train_loader, train_sampler, train_dataset_size, train_stats = setup_data_loader(
         args, options, args.data_path, world_size, rank, tag="train"
     )
-    val_loader, val_sampler, val_dataset_size = setup_data_loader(
+    val_loader, val_sampler, val_dataset_size, val_stats = setup_data_loader(
         args, options, args.data_path, world_size, rank, tag="val"
     )
     logger.info(f"Train dataset size: {train_dataset_size}")
@@ -466,7 +467,7 @@ def main(rank, world_size, args):
                         "particle_mask": particle_mask,
                     }
                     pred_repr, target_repr, context_repr = model(
-                        context, target, full_jet
+                        context, target, full_jet, train_stats
                     )
                     mse_loss = nn.functional.mse_loss(pred_repr, target_repr)
                     loss = mse_loss.clone()
@@ -616,7 +617,7 @@ def main(rank, world_size, args):
                     }
 
                     pred_repr, target_repr, context_repr = model(
-                        context, target, full_jet
+                        context, target, full_jet, val_stats
                     )
                     mse_loss = nn.functional.mse_loss(pred_repr, target_repr)
                     loss = mse_loss.clone()
