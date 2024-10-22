@@ -67,8 +67,7 @@ class Attention(nn.Module):
         # attn = attn.softmax(dim=-1)
         # attn = self.attn_drop(attn)
         # x = (attn @ v).transpose(1, 2).reshape(B, N, C)
-
-        x, _ = self.multihead_attn(q, k, v, key_padding_mask=subjet_masks)
+        x, _ = self.multihead_attn(q, k, v, key_padding_mask=subjet_masks==0)
 
         x = self.proj_drop(x)
         if self.options.debug:
