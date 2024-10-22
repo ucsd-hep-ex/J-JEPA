@@ -368,21 +368,27 @@ class JJEPA(nn.Module):
                 full_jet["p4_spatial"],
                 full_jet["particle_mask"],
                 context_split_mask,
-                stats,
+                stats=stats,
             )
             target_repr = self.target_transformer(
                 full_jet["p4"],
                 full_jet["p4_spatial"],
                 full_jet["particle_mask"],
                 target_split_mask,
-                stats,
+                stats=stats,
             )
         else:
             context_repr = self.context_transformer(
-                full_jet["p4"], full_jet["particle_mask"], context_split_mask, stats
+                full_jet["p4"],
+                full_jet["particle_mask"],
+                context_split_mask,
+                stats=stats,
             )
             target_repr = self.target_transformer(
-                full_jet["p4"], full_jet["particle_mask"], target_split_mask, stats
+                full_jet["p4"],
+                full_jet["particle_mask"],
+                target_split_mask,
+                stats=stats,
             )
         if self.options.debug:
             print(f"Context repr shape: {context_repr.shape}")
@@ -398,7 +404,7 @@ class JJEPA(nn.Module):
                 target["particle_mask"],
                 target["p4"],
                 context["p4"],
-                stats,
+                stats=stats,
             )
             if self.options.debug:
                 pred_repr = self.predictor_check(pred_repr)
