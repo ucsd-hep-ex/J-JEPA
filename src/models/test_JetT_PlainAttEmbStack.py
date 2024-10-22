@@ -19,6 +19,7 @@ if __name__ == "__main__":
     options.display()
 
     jetT = JetsTransformer(options)
+    print(jetT)
 
     # Generate random data for testing
     batch_size = 32

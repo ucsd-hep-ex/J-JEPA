@@ -18,6 +18,7 @@ if __name__ == "__main__":
     options.display()
 
     jjepa = JJEPA(options)
+    print(jjepa)
 
     # Generate random data for testing
     batch_size = 32
