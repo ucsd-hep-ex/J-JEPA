@@ -372,7 +372,7 @@ def main(rank, world_size, args):
 
     for epoch in range(options.start_epochs, options.num_epochs):
         logger.info("Epoch %d" % (epoch + 1))
-        logger.info("lr: %f" % scheduler.get_last_lr()[0])
+        logger.info("lr: %f" % scheduler.get_last_lr()[0])        
         epoch_start_time = time.time()
 
         if train_sampler:
@@ -399,6 +399,9 @@ def main(rank, world_size, args):
         model.train()
         # ["p4_spatial (px, py, pz, e)", "p4 (eta, phi, log_pt, log_e)", "mask"]
         for itr, (p4_spatial, p4, particle_mask) in enumerate(pbar_t):
+
+            # start data loading timer
+            start_data_loading = time.time()
             particle_mask = particle_mask.squeeze(-1).bool()
             p4 = p4.to(dtype=torch.float32)
             p4_spatial = p4_spatial.to(dtype=torch.float32)
@@ -425,6 +428,13 @@ def main(rank, world_size, args):
             target_masks_expanded = target_masks_expanded.expand(
                 -1, -1, 4
             )  # Shape: [B, N, 4]
+
+                        # End Data Loading Timer
+            end_data_loading = time.time()
+            logger.info(f"Data loading time for batch {itr}: {end_data_loading - start_data_loading:.3f} seconds")
+
+            # Start Forward Pass Timer
+            start_forward_pass = time.time()
 
             def train_step():
                 cov_loss = 0
@@ -516,6 +526,11 @@ def main(rank, world_size, args):
                 return loss_dict
 
             loss_dict, etime = gpu_timer(train_step)
+
+            # end forward pass timer
+            end_forward_pass = time.time()
+            logger.info(f"Forward pass time for batch {itr}: {end_forward_pass - start_forward_pass:.3f} seconds")
+
             loss_meter_train.update(loss_dict["total_loss"])
             mse_loss_meter_train.update(loss_dict["mse_loss"])
             if options.cov_loss_weight > 0:
@@ -535,6 +550,7 @@ def main(rank, world_size, args):
 
         train_time_end = time.time()
         logger.info(f"Training time: {train_time_end - epoch_start_time:.1f} s")
+
         # validation
         pbar_v = tqdm(
             val_loader,
