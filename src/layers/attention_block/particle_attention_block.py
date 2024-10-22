@@ -36,7 +36,7 @@ class ParticleAttention(nn.Module):
         particle_masks = particle_masks.flatten(start_dim=0, end_dim=1)
         BMSJ, P, C = x.shape
 
-        x, _ = self.multihead_attn(x, x, x, key_padding_mask=particle_masks)
+        x, _ = self.multihead_attn(x, x, x, key_padding_mask=particle_masks==0)
         x = self.proj_drop(x)
 
         # reshape x back to preserve the bs, n_sj dimensions

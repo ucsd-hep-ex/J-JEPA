@@ -39,7 +39,7 @@ class ClassAttention(nn.Module):
         BMSJ, P, C = u.shape
 
 
-        u, _ = self.multihead_attn(x_cls, u, u, key_padding_mask=seq_masks)  # (1, batch, embed_dim)
+        u, _ = self.multihead_attn(x_cls, u, u, key_padding_mask=seq_masks==0)  # (1, batch, embed_dim)
 
         # reshape x back to preserve the bs, n_sj dimensions
         u = u.reshape(bs, SJ, 1, C)
@@ -83,7 +83,7 @@ class ClassAttentionBlock(nn.Module):
     def forward(self, x, x_cls, particle_masks):
         with torch.no_grad():
             # prepend one element for x_cls: -> (batch, subjet, 1+part_len)
-            particle_masks = torch.cat((torch.zeros_like(particle_masks[:, :, :1]), particle_masks), dim=2)
+            particle_masks = torch.cat((torch.ones_like(particle_masks[:, :, :1]), particle_masks), dim=2)
 
         u = torch.cat((x_cls, x), dim=2)  # (batch, subjet, 1+part_len, embed_dim)
 
