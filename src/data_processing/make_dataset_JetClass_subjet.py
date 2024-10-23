@@ -351,12 +351,12 @@ def main(args):
                     "num_ptcls"
                 ]
                 subjets["particle_indices"][jet_idx, subjet_idx] = subjet["indices"]
-                if subjet["features"]["num_ptcls"] > 0:
-                    for ptcl_idx in subjet["indices"]:
-                        if ptcl_idx != -1 and ptcl_idx < 128:
-                            f_dict["pf_features"]["subjet_indices"][
-                                jet_idx, ptcl_idx
-                            ] = int(subjet_idx)
+                # if subjet["features"]["num_ptcls"] > 0:
+                #     for ptcl_idx in subjet["indices"]:
+                #         if ptcl_idx != -1 and ptcl_idx < 128:
+                #             f_dict["pf_features"]["subjet_indices"][
+                #                 jet_idx, ptcl_idx
+                #             ] = int(subjet_idx)
         with h5py.File(f"{processed_dir}/{file_name}.h5", "w") as hdf:
             particles_group = hdf.create_group("particles")
             for name in f_dict["pf_features"].keys():
@@ -397,6 +397,20 @@ if __name__ == "__main__":
         action="store",
         default="JetCLR",
         help="JetCLR/JJEPA",
+    )
+    parser.add_argument(
+        "--n-subjets",
+        type=int,
+        action="store",
+        default=20,
+        help="number of subjets per jet",
+    )
+    parser.add_argument(
+        "--n-ptcls-per-subjet",
+        type=int,
+        action="store",
+        default=30,
+        help="number of particles per subjet",
     )
 
     args = parser.parse_args()
