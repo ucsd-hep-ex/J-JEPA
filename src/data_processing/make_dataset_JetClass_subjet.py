@@ -13,6 +13,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import awkward as ak
 import torch
+from torch.utils.data import Dataset, DataLoader
 import h5py
 import uproot
 import tqdm
@@ -20,6 +21,8 @@ import fastjet
 import vector
 
 from dotenv import find_dotenv, load_dotenv
+
+from src.dataset.JetDataset import JetDataset
 
 # Register vector for awkward usage
 vector.register_awkward()
@@ -370,6 +373,38 @@ def main(args):
             for name in subjets.keys():
                 subjets_group.create_dataset(name, data=subjets[name])
         print(f"--- saved data file {i} {file_name} to `{processed_dir}` directory")
+
+        final_save_dir = (
+            f"/j-jepa-vol/J-JEPA/data/JetClass/subjet/processed/{label_orig}"
+        )
+        os.makedirs(final_save_dir, exist_ok=True)
+        intermediate_dataset = JetDataset(f"{processed_dir}/{file_name}.h5")
+        train_loader = DataLoader(
+            intermediate_dataset, batch_size=len(intermediate_dataset)
+        )
+        with h5py.File(f"{final_save_dir}/{file_name}.h5", "w") as hf:
+            for data in tqdm(train_loader):
+                (
+                    x,
+                    particle_features,
+                    subjets,
+                    particle_indices,
+                    subjet_mask,
+                    particle_mask,
+                    labels,
+                ) = [d.detach().cpu() for d in data]
+                hf.create_dataset("x", data=x, dtype="float32")
+                hf.create_dataset(
+                    "particle_features", data=particle_features, dtype="float64"
+                )
+                hf.create_dataset("subjets", data=subjets, dtype="float64")
+                hf.create_dataset(
+                    "particle_indices", data=particle_indices, dtype="int32"
+                )
+                hf.create_dataset("subjet_mask", data=subjet_mask, dtype="bool")
+                hf.create_dataset("particle_mask", data=particle_mask, dtype="bool")
+                hf.create_dataset("labels", data=labels, dtype="bool")
+        print(f"--- saved data file {i} {file_name} to `{final_save_dir}` directory")
 
 
 if __name__ == "__main__":
