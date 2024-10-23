@@ -427,8 +427,8 @@ class PlainAttentionEmbeddingStack(nn.Module):
 
         # If all particles in a subjet are masked, unmasked them
         # otherwise, softmax of an all-padded sequence will return NaN
-        is_padded_subjet = (~particle_masks).all(axis=2)
-        particle_masks[is_padded_subjet, :] = True
+        is_padded_subjet = (~particle_masks.bool()).all(axis=2)
+        particle_masks[is_padded_subjet, :] = 1.0
 
         embeddings = vectors
         for layer in self.particle_embedding_layers:
