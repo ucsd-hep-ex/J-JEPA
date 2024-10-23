@@ -288,12 +288,13 @@ def main(args):
                 subjets_meta=subjets.to(args.device),
                 split_mask=None,
             )
-            if args.flatten:
-                reps = reps.view(reps.shape[0], -1)
-            elif args.sum:
-                reps = reps.sum(dim=1)
-            else:
-                raise ValueError("No aggregation method specified")
+            if not args.cls:
+                if args.flatten:
+                    reps = reps.view(reps.shape[0], -1)
+                elif args.sum:
+                    reps = reps.sum(dim=1)
+                else:
+                    raise ValueError("No aggregation method specified")
             out = proj(reps)
             batch_loss = loss(out, y.long()).to(args.device)
             batch_loss.backward()
@@ -323,12 +324,13 @@ def main(args):
                     subjets_meta=subjets.to(args.device),
                     split_mask=None,
                 )
-                if args.flatten:
-                    reps = reps.view(reps.shape[0], -1)
-                elif args.sum:
-                    reps = reps.sum(dim=1)
-                else:
-                    raise ValueError("No aggregation method specified")
+                if not args.cls:
+                    if args.flatten:
+                        reps = reps.view(reps.shape[0], -1)
+                    elif args.sum:
+                        reps = reps.sum(dim=1)
+                    else:
+                        raise ValueError("No aggregation method specified")
                 out = proj(reps)
                 batch_loss = loss(out, y.long()).detach().cpu().item()
                 losses_e_val.append(batch_loss)
