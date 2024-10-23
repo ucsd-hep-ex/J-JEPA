@@ -35,14 +35,18 @@ if __name__ == "__main__":
     has_nan = False
     for i in range(10):
         print(f'Testing trial {i+1}')
-        x = torch.rand(bs, N_sj, N_part, N_part_ftr, dtype=torch.float)
-        particle_masks = torch.randint(low=0, high=2, size=(bs, N_sj, N_part)).bool()
-        x[particle_masks] = 0.000
+        x = torch.rand(bs, N_sj, N_part, N_part_ftr, dtype=torch.float)*6-3
+        particle_masks = torch.zeros(bs, N_sj, N_part).bool()
+        particle_masks[:, 0:5, 0:20] = True
+        particle_masks[:, 5:10, 0:12] = True
+        particle_masks[:, 10:15, 0:5] = True
+        x[particle_masks==0] = 0.000
         result = emb(x, particle_masks)
 
         has_nan = has_nan or torch.isnan(result).any()
 
     print(x)
+    print(particle_masks==0)
     print(result)
     print(result.shape)
     print("has_nan", has_nan)
