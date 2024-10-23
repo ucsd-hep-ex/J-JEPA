@@ -378,12 +378,12 @@ def main(args):
             f"/j-jepa-vol/J-JEPA/data/JetClass/subjet/processed/{label_orig}"
         )
         os.makedirs(final_save_dir, exist_ok=True)
-        intermediate_dataset = JetDataset(f"{processed_dir}/{file_name}.h5")
+        intermediate_dataset = JetDataset(f"{processed_dir}/{file_name}.h5", labels=True)
         train_loader = DataLoader(
             intermediate_dataset, batch_size=len(intermediate_dataset)
         )
         with h5py.File(f"{final_save_dir}/{file_name}.h5", "w") as hf:
-            for data in tqdm(train_loader):
+            for data in tqdm.tqdm(train_loader):
                 (
                     x,
                     particle_features,
