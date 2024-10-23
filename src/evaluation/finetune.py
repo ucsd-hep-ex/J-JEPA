@@ -279,12 +279,13 @@ def main(args):
             optimizer.zero_grad()
 
             y = labels.to(args.device)
+            subjet_mask = subjet_mask.to(args.device)
             x = x.view(x.shape[0], x.shape[1], -1)
             x = x.to(args.device)
             batch = {"particles": x.to(torch.float32)}
             reps = net(
                 batch,
-                subjet_mask.to(args.device),
+                subjet_mask,
                 subjets_meta=subjets.to(args.device),
                 split_mask=None,
             )
@@ -295,7 +296,9 @@ def main(args):
                     reps = reps.sum(dim=1)
                 else:
                     raise ValueError("No aggregation method specified")
-            out = proj(reps)
+                out = proj(reps)
+            else:
+                out = proj(reps.transpose(0, 1), padding_mask=subjet_mask)
             batch_loss = loss(out, y.long()).to(args.device)
             batch_loss.backward()
             optimizer.step()
@@ -315,12 +318,13 @@ def main(args):
             pbar = tqdm(val_dataloader)
             for i, (x, _, subjets, _, subjet_mask, _, labels) in enumerate(pbar):
                 y = labels.to(args.device)
+                subjet_mask = subjet_mask.to(args.device)
                 x = x.view(x.shape[0], x.shape[1], -1)
                 x = x.to(args.device)
                 batch = {"particles": x.to(torch.float32)}
                 reps = net(
                     batch,
-                    subjet_mask.to(args.device),
+                    subjet_mask,
                     subjets_meta=subjets.to(args.device),
                     split_mask=None,
                 )
@@ -331,7 +335,9 @@ def main(args):
                         reps = reps.sum(dim=1)
                     else:
                         raise ValueError("No aggregation method specified")
-                out = proj(reps)
+                    out = proj(reps)
+                else:
+                    out = proj(reps.transpose(0, 1), padding_mask=subjet_mask)
                 batch_loss = loss(out, y.long()).detach().cpu().item()
                 losses_e_val.append(batch_loss)
                 predicted_e.append(softmax(out).cpu().data.numpy())
