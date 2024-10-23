@@ -240,6 +240,7 @@ def main(rank, world_size, args):
     options.cov_loss_weight = args.cov_loss_weight
     options.var_loss_weight = args.var_loss_weight
     options.base_momentum = args.base_momentum
+    options.encoder_pos_emb = False
 
     setup_logging(rank, args.output_dir)
     logger.info(f"Initialized (rank/world-size) {rank}/{world_size}")
