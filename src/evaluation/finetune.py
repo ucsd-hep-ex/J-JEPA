@@ -32,6 +32,7 @@ from sklearn import metrics
 from src.models.jjepa import JJEPA
 from src.options import Options
 from src.dataset.JetDataset import JetDataset
+from src.evaluation.ClassificationHead import ClassificationHead
 
 
 # set the number of threads that pytorch will use
@@ -147,7 +148,7 @@ def main(args):
     options = Options.load(args.option_file)
     args.output_dim = options.emb_dim
 
-    if args.flatten:
+    if args.flatten and not args.cls:
         args.output_dim *= 20
     out_dir = args.out_dir
     args.opt = "adam"
@@ -174,6 +175,7 @@ def main(args):
     args.logfile = f"{out_dir}/logfile.txt"
     logfile = open(args.logfile, "a")
     print("logfile initialised", file=logfile, flush=True)
+    print("output dimension: " + str(args.output_dim), file=logfile, flush=True)
     if args.flatten:
         print("aggregation method: flatten", file=logfile, flush=True)
     elif args.sum:
@@ -231,7 +233,10 @@ def main(args):
     finetune_mlp_dim = args.output_dim
     if args.finetune_mlp:
         finetune_mlp_dim = f"{args.output_dim}-{args.finetune_mlp}"
-    proj = Projector(2, finetune_mlp_dim).to(args.device)
+    if args.cls:
+        proj = ClassificationHead(finetune_mlp_dim).to(args.device)
+    else:
+        proj = Projector(2, finetune_mlp_dim).to(args.device)
     print(f"finetune mlp: {proj}", flush=True, file=logfile)
     if args.finetune:
         optimizer = optim.Adam(
@@ -543,6 +548,13 @@ if __name__ == "__main__":
         action="store",
         default=0,
         help="whether the pretrained model is old (old attention blocks before Billy's update)",
+    )
+    parser.add_argument(
+        "--cls",
+        type=int,
+        action="store",
+        default=0,
+        help="whether to use class attention blocks in the classification head",
     )
 
     args = parser.parse_args()
