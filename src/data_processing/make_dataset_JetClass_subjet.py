@@ -378,7 +378,9 @@ def main(args):
             f"/j-jepa-vol/J-JEPA/data/JetClass/subjet/processed/{label_orig}"
         )
         os.makedirs(final_save_dir, exist_ok=True)
-        intermediate_dataset = JetDataset(f"{processed_dir}/{file_name}.h5", labels=True)
+        intermediate_dataset = JetDataset(
+            f"{processed_dir}/{file_name}.h5", labels=True
+        )
         train_loader = DataLoader(
             intermediate_dataset, batch_size=len(intermediate_dataset)
         )
@@ -405,6 +407,7 @@ def main(args):
                 hf.create_dataset("particle_mask", data=particle_mask, dtype="bool")
                 hf.create_dataset("labels", data=labels, dtype="bool")
         print(f"--- saved data file {i} {file_name} to `{final_save_dir}` directory")
+        os.remove(f"{processed_dir}/{file_name}.h5")
 
 
 if __name__ == "__main__":
