@@ -31,7 +31,7 @@
     "use_predictor": true,
     "trgt_ratio": 0.3,
     "max_targets": 21,
-    "use_parT": true,
+    "use_parT": false,
     "fc_params": [],
     "embed_dims":[128, 512, 128],
     "predictor_embed_dims": [64, 64, 64]
