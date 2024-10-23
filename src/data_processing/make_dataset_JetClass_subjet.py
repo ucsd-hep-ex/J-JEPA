@@ -310,104 +310,138 @@ def main(args):
         label += "_20M"
     data_dir = f"/j-jepa-vol/JetClass/Pythia/{label}"
     data_files = glob.glob(f"{data_dir}/*")
+    # Select signal files that start with 'TTBar'
+    signal_files = [f for f in data_files if os.path.basename(f).startswith("TTBar_")]
+
+    # Select background files that start with 'ZToQQ', 'ZJetsToNuNu', or 'WToQQ'
+    background_prefixes = ("ZToQQ", "ZJetsToNuNu", "WToQQ")
+    background_files = [
+        f for f in data_files if os.path.basename(f).startswith(background_prefixes)
+    ]
     label_orig = label.split("_")[0]  # without _100M, _5M, _20M
+
     processed_dir = f"/j-jepa-vol/J-JEPA/data/JetClass/subjet/{label_orig}"
     os.system(f"mkdir -p {processed_dir}")
 
-    for i, file in enumerate(data_files):
-        tree = uproot.open(file)["tree"]
-        file_name = file.split("/")[-1].split(".")[0]
-        print(f"--- loaded data file {i} {file_name} from `{label}` directory")
-        f_dict = build_features_and_labels(tree)
-        num_jets = f_dict["pf_features"]["part_px"].shape[0]
-        # Initialize an empty list to store serialized subjets information
-        subjet_feature_names = [
-            "subjet_pt",
-            "subjet_eta",
-            "subjet_phi",
-            "subjet_num_ptcls",
-        ]
-        subjets = {
-            name: np.zeros((num_jets, args.n_subjets))
-            for i, name in enumerate(subjet_feature_names)
-        }
-        subjets["particle_indices"] = np.zeros(
-            (num_jets, args.n_subjets, args.n_ptcls_per_subjet)
-        )
-        _px = f_dict["pf_features"]["part_px"]
-        _py = f_dict["pf_features"]["part_py"]
-        _pz = f_dict["pf_features"]["part_pz"]
-        _e = f_dict["pf_features"]["part_energy"]
-        for jet_idx in tqdm.tqdm(range(num_jets)):
-            subjets_info = get_subjets(
-                _px[jet_idx], _py[jet_idx], _pz[jet_idx], _e[jet_idx]
-            )
-            subjets_info_padded = zero_pad(
-                subjets_info, args.n_subjets, args.n_ptcls_per_subjet
-            )
-            subjets_padded = subjets_info_padded[: args.n_subjets]
-            for subjet_idx, subjet in enumerate(subjets_padded):
-                subjets["subjet_pt"][jet_idx, subjet_idx] = subjet["features"]["pT"]
-                subjets["subjet_eta"][jet_idx, subjet_idx] = subjet["features"]["eta"]
-                subjets["subjet_phi"][jet_idx, subjet_idx] = subjet["features"]["phi"]
-                subjets["subjet_num_ptcls"][jet_idx, subjet_idx] = subjet["features"][
-                    "num_ptcls"
+    file_dict = {
+        "signal": signal_files,
+        "background": background_files,
+    }
+    final_save_dir = f"/j-jepa-vol/J-JEPA/data/JetClass/subjet/processed/{label_orig}/"
+    os.makedirs(final_save_dir, exist_ok=True)
+    total_num_jets_dict = {
+        "train": 500 * 1000,
+        "val": 25 * 1000,
+        "test": 100 * 1000,
+    }
+    total_num_jets = total_num_jets_dict[label_orig]
+    print(f"--- total number of jets to save: {total_num_jets}")
+    for key in file_dict.keys():
+        data_files = file_dict[key]
+        num_jets_saved = 0
+        while num_jets_saved < total_num_jets:
+            for i, file in enumerate(data_files):
+                tree = uproot.open(file)["tree"]
+                file_name = file.split("/")[-1].split(".")[0]
+                print(f"--- loaded data file {i} {file_name} from `{label}` directory")
+                f_dict = build_features_and_labels(tree)
+                num_jets = f_dict["pf_features"]["part_px"].shape[0]
+                # Initialize an empty list to store serialized subjets information
+                subjet_feature_names = [
+                    "subjet_pt",
+                    "subjet_eta",
+                    "subjet_phi",
+                    "subjet_num_ptcls",
                 ]
-                subjets["particle_indices"][jet_idx, subjet_idx] = subjet["indices"]
-                # if subjet["features"]["num_ptcls"] > 0:
-                #     for ptcl_idx in subjet["indices"]:
-                #         if ptcl_idx != -1 and ptcl_idx < 128:
-                #             f_dict["pf_features"]["subjet_indices"][
-                #                 jet_idx, ptcl_idx
-                #             ] = int(subjet_idx)
-        with h5py.File(f"{processed_dir}/{file_name}.h5", "w") as hdf:
-            particles_group = hdf.create_group("particles")
-            for name in f_dict["pf_features"].keys():
-                particles_group.create_dataset(name, data=f_dict["pf_features"][name])
-            hdf.create_dataset("labels", data=f_dict["label"])
-            hdf.create_dataset("mask", data=f_dict["pf_mask"]["part_mask"])
-            stats_group = hdf.create_group("stats")
-            for name in f_dict["stats"].keys():
-                stats_group.create_dataset(name, data=f_dict["stats"][name])
-            subjets_group = hdf.create_group("subjets")
-            for name in subjets.keys():
-                subjets_group.create_dataset(name, data=subjets[name])
-        print(f"--- saved data file {i} {file_name} to `{processed_dir}` directory")
+                subjets = {
+                    name: np.zeros((num_jets, args.n_subjets))
+                    for i, name in enumerate(subjet_feature_names)
+                }
+                subjets["particle_indices"] = np.zeros(
+                    (num_jets, args.n_subjets, args.n_ptcls_per_subjet)
+                )
+                _px = f_dict["pf_features"]["part_px"]
+                _py = f_dict["pf_features"]["part_py"]
+                _pz = f_dict["pf_features"]["part_pz"]
+                _e = f_dict["pf_features"]["part_energy"]
+                for jet_idx in tqdm.tqdm(range(num_jets)):
+                    subjets_info = get_subjets(
+                        _px[jet_idx], _py[jet_idx], _pz[jet_idx], _e[jet_idx]
+                    )
+                    subjets_info_padded = zero_pad(
+                        subjets_info, args.n_subjets, args.n_ptcls_per_subjet
+                    )
+                    subjets_padded = subjets_info_padded[: args.n_subjets]
+                    for subjet_idx, subjet in enumerate(subjets_padded):
+                        subjets["subjet_pt"][jet_idx, subjet_idx] = subjet["features"][
+                            "pT"
+                        ]
+                        subjets["subjet_eta"][jet_idx, subjet_idx] = subjet["features"][
+                            "eta"
+                        ]
+                        subjets["subjet_phi"][jet_idx, subjet_idx] = subjet["features"][
+                            "phi"
+                        ]
+                        subjets["subjet_num_ptcls"][jet_idx, subjet_idx] = subjet[
+                            "features"
+                        ]["num_ptcls"]
+                        subjets["particle_indices"][jet_idx, subjet_idx] = subjet[
+                            "indices"
+                        ]
+                with h5py.File(f"{processed_dir}/{file_name}.h5", "w") as hdf:
+                    particles_group = hdf.create_group("particles")
+                    for name in f_dict["pf_features"].keys():
+                        particles_group.create_dataset(
+                            name, data=f_dict["pf_features"][name]
+                        )
+                    hdf.create_dataset("labels", data=f_dict["label"])
+                    hdf.create_dataset("mask", data=f_dict["pf_mask"]["part_mask"])
+                    stats_group = hdf.create_group("stats")
+                    for name in f_dict["stats"].keys():
+                        stats_group.create_dataset(name, data=f_dict["stats"][name])
+                    subjets_group = hdf.create_group("subjets")
+                    for name in subjets.keys():
+                        subjets_group.create_dataset(name, data=subjets[name])
+                print(
+                    f"--- saved data file {i} {file_name} to `{processed_dir}` directory"
+                )
 
-        final_save_dir = (
-            f"/j-jepa-vol/J-JEPA/data/JetClass/subjet/processed/{label_orig}"
-        )
-        os.makedirs(final_save_dir, exist_ok=True)
-        intermediate_dataset = JetDataset(
-            f"{processed_dir}/{file_name}.h5", labels=True
-        )
-        train_loader = DataLoader(
-            intermediate_dataset, batch_size=len(intermediate_dataset)
-        )
-        with h5py.File(f"{final_save_dir}/{file_name}.h5", "w") as hf:
-            for data in tqdm.tqdm(train_loader):
-                (
-                    x,
-                    particle_features,
-                    subjets,
-                    particle_indices,
-                    subjet_mask,
-                    particle_mask,
-                    labels,
-                ) = [d.detach().cpu() for d in data]
-                hf.create_dataset("x", data=x, dtype="float32")
-                hf.create_dataset(
-                    "particle_features", data=particle_features, dtype="float64"
+                intermediate_dataset = JetDataset(
+                    f"{processed_dir}/{file_name}.h5", labels=True
                 )
-                hf.create_dataset("subjets", data=subjets, dtype="float64")
-                hf.create_dataset(
-                    "particle_indices", data=particle_indices, dtype="int32"
+                train_loader = DataLoader(
+                    intermediate_dataset, batch_size=len(intermediate_dataset)
                 )
-                hf.create_dataset("subjet_mask", data=subjet_mask, dtype="bool")
-                hf.create_dataset("particle_mask", data=particle_mask, dtype="bool")
-                hf.create_dataset("labels", data=labels, dtype="bool")
-        print(f"--- saved data file {i} {file_name} to `{final_save_dir}` directory")
-        os.remove(f"{processed_dir}/{file_name}.h5")
+                with h5py.File(f"{final_save_dir}/{file_name}.h5", "w") as hf:
+                    for data in tqdm.tqdm(train_loader):
+                        (
+                            x,
+                            particle_features,
+                            subjets,
+                            particle_indices,
+                            subjet_mask,
+                            particle_mask,
+                            labels,
+                        ) = [d.detach().cpu() for d in data]
+                        hf.create_dataset("x", data=x, dtype="float32")
+                        hf.create_dataset(
+                            "particle_features", data=particle_features, dtype="float64"
+                        )
+                        hf.create_dataset("subjets", data=subjets, dtype="float64")
+                        hf.create_dataset(
+                            "particle_indices", data=particle_indices, dtype="int32"
+                        )
+                        hf.create_dataset("subjet_mask", data=subjet_mask, dtype="bool")
+                        hf.create_dataset(
+                            "particle_mask", data=particle_mask, dtype="bool"
+                        )
+                        hf.create_dataset("labels", data=labels, dtype="bool")
+                print(
+                    f"--- saved data file {i} {file_name} to `{final_save_dir}` directory"
+                )
+                num_jets_saved += len(intermediate_dataset)
+                print(f"--- total jets saved: {num_jets_saved}")
+                os.remove(f"{processed_dir}/{file_name}.h5")
 
 
 if __name__ == "__main__":
