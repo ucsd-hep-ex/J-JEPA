@@ -317,7 +317,7 @@ class PlainAttentionEmbeddingStack(nn.Module):
         if self.has_cls_attn_blks:
             self.init_std = options.init_std
             self.cls_token = nn.Parameter(torch.zeros(1, 1, 1, options.particle_emb_dim), requires_grad=True)
-            trunc_normal_(self.mask_token, std=self.init_std)
+            trunc_normal_(self.cls_token, std=self.init_std)
             self.class_attention_blocks = nn.ModuleList(self.create_class_attention_blocks(options))
 
         # pre-act norm
