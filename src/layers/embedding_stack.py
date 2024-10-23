@@ -12,6 +12,8 @@ from src.layers.attention_block import create_particle_attention_block, create_c
 
 from src.options import Options
 
+from src.util.tensors import trunc_normal_
+
 
 class EmbeddingStack(nn.Module):
     __constants__ = ["input_dim"]
@@ -313,7 +315,9 @@ class PlainAttentionEmbeddingStack(nn.Module):
         self.particle_embedding_layers = nn.ModuleList(self.create_particle_embedding_layers(options, options.num_part_ftr))
         self.particle_attention_blocks = nn.ModuleList(self.create_particle_attention_blocks(options))
         if self.has_cls_attn_blks:
+            self.init_std = options.init_std
             self.cls_token = nn.Parameter(torch.zeros(1, 1, 1, options.particle_emb_dim), requires_grad=True)
+            trunc_normal_(self.mask_token, std=self.init_std)
             self.class_attention_blocks = nn.ModuleList(self.create_class_attention_blocks(options))
 
         # pre-act norm
