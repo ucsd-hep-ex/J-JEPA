@@ -313,11 +313,8 @@ def main(args):
     # Select signal files that start with 'TTBar'
     signal_files = [f for f in data_files if os.path.basename(f).startswith("TTBar_")]
 
-    # Select background files that start with 'ZToQQ', 'ZJetsToNuNu', or 'WToQQ'
-    background_prefixes = ("ZToQQ", "ZJetsToNuNu", "WToQQ")
-    background_files = [
-        f for f in data_files if os.path.basename(f).startswith(background_prefixes)
-    ]
+    # Select background files that start with 'ZJetsToNuNu'
+    background_files = [f for f in data_files if os.path.basename(f).startswith("ZJetsToNuNu")]
     label_orig = label.split("_")[0]  # without _100M, _5M, _20M
 
     processed_dir = f"/j-jepa-vol/J-JEPA/data/JetClass/subjet/{label_orig}"
@@ -327,7 +324,7 @@ def main(args):
         "signal": signal_files,
         "background": background_files,
     }
-    final_save_dir = f"/j-jepa-vol/J-JEPA/data/JetClass/subjet/processed/{label_orig}/"
+    final_save_dir = f"/j-jepa-vol/J-JEPA/data/JetClass/subjet/processed_1p/{label_orig}/"
     os.makedirs(final_save_dir, exist_ok=True)
     total_num_jets_dict = {
         "train": 500 * 1000,
