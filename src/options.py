@@ -35,6 +35,9 @@ class Options(Namespace):
         # Use predictor
         self.use_predictor: bool = True
 
+        # type of positional embedding: space -> eta, phi based, pt -> pt based
+        self.pos_emb_type: str = "space"
+
         # embedding layers type
         self.embedding_layers_type = "EmbeddingStack"
         self.predictor_embedding_layers_type = "EmbeddingStack"

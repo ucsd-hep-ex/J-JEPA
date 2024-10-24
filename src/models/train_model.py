@@ -64,6 +64,12 @@ def parse_args():
         default=1,
         help="flatten reps when calculating variance loss",
     )
+    parser.add_argument(
+        "--pos-emb-type",
+        type=str,
+        default="space",
+        help="Type of positional embedding to use, choose between pt and space",
+    )
     return parser.parse_args()
 
 
@@ -95,43 +101,46 @@ def setup_data_loader(options, data_path, world_size, rank, tag="train"):
     )
     return loader, sampler, len(dataset)
 
+
 def create_random_masks(batch_size, num_subjets, device, context_scale=0.7):
     """_summary_
-        Selects a random subset of subjets to be used as context and target subjets
-        For target subjets it selects a random subset of numbers from 0-9
-        While for the context subjets it selects from the whole range of 0-19
+    Selects a random subset of subjets to be used as context and target subjets
+    For target subjets it selects a random subset of numbers from 0-9
+    While for the context subjets it selects from the whole range of 0-19
     """
     context_masks = []
     target_masks = []
-    
+
     for _ in range(batch_size):
         # Target selection from 0-9
         num_targets = int(num_subjets * (1 - context_scale))  # how many targets we want
-        target_perm = torch.randperm(10, device=device)       # shuffle numbers 0-9
-        target_indices = target_perm[:num_targets]            # take first num_targets indices
-        
+        target_perm = torch.randperm(10, device=device)  # shuffle numbers 0-9
+        target_indices = target_perm[:num_targets]  # take first num_targets indices
+
         # Context selection from the remaining indices
-        remaining_indices = torch.tensor([i for i in range(num_subjets) if i not in target_indices], device=device)
+        remaining_indices = torch.tensor(
+            [i for i in range(num_subjets) if i not in target_indices], device=device
+        )
         context_size = int(num_subjets * context_scale)
         context_indices = remaining_indices[:context_size]
-        
+
         print("====================================")
         print("context indices", context_indices)
         print("num_targets", num_targets)
         print("target_perm", target_perm)
         print("target_indices", target_indices)
         print("====================================")
-        
+
         # Create masks
         context_mask = torch.zeros(num_subjets, dtype=torch.bool, device=device)
         target_mask = torch.zeros(num_subjets, dtype=torch.bool, device=device)
-        
+
         context_mask[context_indices] = True
         target_mask[target_indices] = True
-        
+
         context_masks.append(context_mask)
         target_masks.append(target_mask)
-    
+
     return torch.stack(context_masks), torch.stack(target_masks)
 
 
