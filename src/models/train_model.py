@@ -276,6 +276,7 @@ def main(rank, world_size, args):
     logger.info(f"Initialized (rank/world-size) {rank}/{world_size}")
     logger.info(f"covariance loss weight: {options.cov_loss_weight}")
     logger.info(f"variance loss weight: {options.var_loss_weight}")
+    logger.info(f"using positional embedding type: {args.pos_emb_type}")
 
     model = JJEPA(options).to(device)
     logger.info(model)
