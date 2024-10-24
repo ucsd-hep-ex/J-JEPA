@@ -77,7 +77,7 @@ def adjust_state_dict(saved_state_dict):
     return adjusted_state_dict
 
 
-def load_model(logfile, options, model_path=None, device="cpu", old=False):
+def load_model(args, logfile, options, model_path=None, device="cpu", old=False):
     model = JJEPA(options).to(device)
     if model_path:
         # Load the saved state_dict
@@ -91,7 +91,8 @@ def load_model(logfile, options, model_path=None, device="cpu", old=False):
         print(f"Loaded model from {model_path}", file=logfile, flush=True)
     else:
         print("No model path provided, training from scratch", file=logfile, flush=True)
-    print(model, file=logfile, flush=True)
+    if not args.from_checkpoint:
+        print(model, file=logfile, flush=True)
     return model
 
 
@@ -225,7 +226,7 @@ def main(args):
 
     # initialise the network
     model = load_model(
-        logfile, options, args.load_jjepa_path, args.device, old=args.old
+        args, logfile, options, args.load_jjepa_path, args.device, old=args.old
     )
     net = model.target_transformer
 
@@ -323,7 +324,7 @@ def main(args):
                     raise ValueError("No aggregation method specified")
                 out = proj(reps)
             else:
-                out = proj(reps.transpose(0, 1), padding_mask=subjet_mask==0)
+                out = proj(reps.transpose(0, 1), padding_mask=subjet_mask == 0)
             batch_loss = loss(out, y.long()).to(args.device)
             batch_loss.backward()
             optimizer.step()
@@ -362,7 +363,7 @@ def main(args):
                         raise ValueError("No aggregation method specified")
                     out = proj(reps)
                 else:
-                    out = proj(reps.transpose(0, 1), padding_mask=subjet_mask==0)
+                    out = proj(reps.transpose(0, 1), padding_mask=subjet_mask == 0)
                 batch_loss = loss(out, y.long()).detach().cpu().item()
                 losses_e_val.append(batch_loss)
                 predicted_e.append(softmax(out).cpu().data.numpy())
