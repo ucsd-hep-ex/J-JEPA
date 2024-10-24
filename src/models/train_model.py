@@ -269,6 +269,7 @@ def main(rank, world_size, args):
     logger.info(f"variance loss weight: {options.var_loss_weight}")
 
     model = JJEPA(options).to(device)
+    logger.info(model)
     model = model.to(dtype=torch.float32)
     # checkpoint = {
     #     "model": model.state_dict(),

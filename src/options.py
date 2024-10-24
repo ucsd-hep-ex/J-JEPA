@@ -39,6 +39,20 @@ class Options(Namespace):
         self.embedding_layers_type = "EmbeddingStack"
         self.predictor_embedding_layers_type = "EmbeddingStack"
 
+        # attributes in this section are used when you use attention-based subjet embedding
+        self.particle_emb_dim: int = 128
+        self.num_particle_embedding_layers: int = 10
+        self.initial_particle_embedding_dim: int = 8
+        self.initial_particle_embedding_skip_connections: bool = False
+        self.particle_embedding_skip_connections: bool = True
+        self.num_heads_in_subjet_embedding_blocks: int = 8
+        self.num_particle_attention_blocks_in_embedding: int = 8
+        self.num_class_attention_blocks_in_embedding: int = 2
+
+        # what kind of particle attention bock to be used
+        # set it to None == not used
+        self.attention_embedding_block_type = None
+
         # pos embedding type
         self.pos_emb_type = "space"
 

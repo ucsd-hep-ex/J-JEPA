@@ -67,8 +67,7 @@ class Attention(nn.Module):
         # attn = attn.softmax(dim=-1)
         # attn = self.attn_drop(attn)
         # x = (attn @ v).transpose(1, 2).reshape(B, N, C)
-
-        x, _ = self.multihead_attn(q, k, v, key_padding_mask=subjet_masks)
+        x, _ = self.multihead_attn(q, k, v, key_padding_mask=subjet_masks==0)
 
         x = self.proj_drop(x)
         if self.options.debug:
@@ -172,7 +171,7 @@ class JetsTransformer(nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
-    def forward(self, x, subjet_masks, subjets_meta, split_mask):
+    def forward(self, x, subjet_masks, subjets_meta, split_mask, particle_masks=None):
         """
         Inputs:
             x: particles of subjets
@@ -189,10 +188,16 @@ class JetsTransformer(nn.Module):
         # Flatten last two dimensions to [B, SJ, P*DP]
         x = x["particles"]
         B, SJ, _ = x.shape
-        x = x.view(B, SJ, -1)
 
         # subjet emb
-        x = self.subjet_emb(x)
+        # if not use attention blks to create subjet emb
+        if particle_masks is None:
+            x = x.view(B, SJ, -1)
+            x = self.subjet_emb(x)
+        # use attention blks to create subjet emb
+        else:
+            x = x.view(B, SJ, -1, self.num_part_ftr)
+            x = self.subjet_emb(x, particle_masks)
 
         # pos emb
         if self.options.encoder_pos_emb:
@@ -325,6 +330,7 @@ class JJEPA(nn.Module):
         self.use_predictor = options.use_predictor
         self.context_transformer = JetsTransformer(options)
         self.target_transformer = copy.deepcopy(self.context_transformer)
+        self.need_particle_masks = ('att' in options.embedding_layers_type.lower())
         for param in self.target_transformer.parameters():
             param.requires_grad = False
         if self.use_predictor:
@@ -359,18 +365,40 @@ class JJEPA(nn.Module):
     def forward(self, context, target, full_jet):
         if self.options.debug:
             print(f"JJEPA forward pass")
-        context_repr = self.context_transformer(
-            full_jet,
-            full_jet["subjet_mask"],
-            full_jet["subjets"],
-            context["split_mask"],
-        )
-        # Debug Statement
-        if self.options.debug:
-            context_repr = self.context_check(context_repr)
-        target_repr = self.target_transformer(
-            full_jet, full_jet["subjet_mask"], full_jet["subjets"], target["split_mask"]
-        )
+
+
+
+        if self.need_particle_masks:
+            context_repr = self.context_transformer(
+                full_jet,
+                full_jet["subjet_mask"],
+                full_jet["subjets"],
+                context["split_mask"],
+                full_jet['particle_mask']
+            )
+
+            # Debug Statement
+            if self.options.debug:
+                context_repr = self.context_check(context_repr)
+
+            target_repr = self.target_transformer(
+                full_jet, full_jet["subjet_mask"], full_jet["subjets"], target["split_mask"], full_jet["particle_mask"]
+            )
+        else:
+            context_repr = self.context_transformer(
+                full_jet,
+                full_jet["subjet_mask"],
+                full_jet["subjets"],
+                context["split_mask"],
+            )
+
+            # Debug Statement
+            if self.options.debug:
+                context_repr = self.context_check(context_repr)
+
+            target_repr = self.target_transformer(
+                full_jet, full_jet["subjet_mask"], full_jet["subjets"], target["split_mask"]
+            )
         if self.use_predictor:
             # TODO: update the input to the model x, subjet_mask, target_subjet_ftrs, context_subjet_ftrs):
             pred_repr = self.predictor_transformer(
