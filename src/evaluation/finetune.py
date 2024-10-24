@@ -276,7 +276,7 @@ def main(args):
         optimizer.load_state_dict(checkpoint["opt"])
 
         # Restore additional variables
-        epoch_start = checkpoint["epoch"]
+        epoch_start = checkpoint["epoch"] + 1
         l_val_best = checkpoint["val loss"]
         acc_val_best = checkpoint["val acc"]
         rej_val_best = checkpoint["val rej"]
