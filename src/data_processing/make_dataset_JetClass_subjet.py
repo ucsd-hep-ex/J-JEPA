@@ -327,7 +327,7 @@ def main(args):
         "background": background_files,
     }
     final_save_dir = (
-        f"/j-jepa-vol/J-JEPA/data/JetClass/subjet/processed_1p/{label_orig}/"
+        f"/j-jepa-vol/J-JEPA/data/JetClass/subjet/processed_1p_2/{label_orig}/"
     )
     os.makedirs(final_save_dir, exist_ok=True)
     total_num_jets_dict = {
