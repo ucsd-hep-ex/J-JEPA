@@ -123,14 +123,6 @@ def create_random_masks(batch_size, num_subjets, device, context_scale=0.7):
         )
         context_size = int(num_subjets * context_scale)
         context_indices = remaining_indices[:context_size]
-
-        print("====================================")
-        print("context indices", context_indices)
-        print("num_targets", num_targets)
-        print("target_perm", target_perm)
-        print("target_indices", target_indices)
-        print("====================================")
-
         # Create masks
         context_mask = torch.zeros(num_subjets, dtype=torch.bool, device=device)
         target_mask = torch.zeros(num_subjets, dtype=torch.bool, device=device)
