@@ -4,46 +4,103 @@ import h5py
 import os
 import numpy as np
 
+
 class JEPADataset(Dataset):
     def __init__(self, directory_path, num_jets=None):
-        # Initialize empty lists to store the datasets
-        x_list, particle_features_list, subjets_list = [], [], []
-        particle_indices_list, subjet_mask_list, particle_mask_list = [], [], []
+        self.directory_path = directory_path
+        self.file_list = []
+        self.file_sizes = []
+        self.cumulative_sizes = []
+        total_samples = 0
+        print()
 
-        # Loop through each file in the directory
+        # Gather all HDF5 files in the directory
         for filename in os.listdir(directory_path):
             if filename.endswith(".hdf5") or filename.endswith(".h5"):
                 file_path = os.path.join(directory_path, filename)
-                with h5py.File(file_path, 'r') as file:
-                    # Append each dataset to the corresponding list
-                    print(f"Loading {filename}")
-                    x_list.append(file['x'][:])
-                    particle_features_list.append(file['particle_features'][:])
-                    subjets_list.append(file['subjets'][:])
-                    particle_indices_list.append(file['particle_indices'][:])
-                    subjet_mask_list.append(file['subjet_mask'][:])
-                    particle_mask_list.append(file['particle_mask'][:])
-                print(f"Loaded {filename}")
+                with h5py.File(file_path, "r") as file:
+                    num_samples = file["x"].shape[0]  # Adjust 'x' to your dataset's key
+                self.file_list.append(file_path)
+                self.file_sizes.append(num_samples)
+                total_samples += num_samples
+                self.cumulative_sizes.append(total_samples)
 
-        # Concatenate all datasets from all files
-        self.x = np.concatenate(x_list, axis=0)
-        self.particle_features = np.concatenate(particle_features_list, axis=0)
-        self.subjets = np.concatenate(subjets_list, axis=0)
-        self.particle_indices = np.concatenate(particle_indices_list, axis=0)
-        self.subjet_mask = np.concatenate(subjet_mask_list, axis=0)
-        self.particle_mask = np.concatenate(particle_mask_list, axis=0)
+        # If num_jets is specified, adjust the total number of samples and cumulative sizes
+        if num_jets is not None:
+            total_samples = min(total_samples, num_jets)
+            self.total_samples = total_samples
 
-        if num_jets:
-            self.x = self.x[:num_jets]
-            self.particle_features = self.particle_features[:num_jets]
-            self.subjets = self.subjets[:num_jets]
-            self.particle_indices = self.particle_indices[:num_jets]
-            self.subjet_mask = self.subjet_mask[:num_jets]
-            self.particle_mask = self.particle_mask[:num_jets]
+            # Adjust cumulative sizes to reflect num_jets
+            adjusted_cumulative_sizes = []
+            cumulative = 0
+            for size in self.file_sizes:
+                if cumulative + size >= num_jets:
+                    adjusted_cumulative_sizes.append(num_jets)
+                    break
+                else:
+                    cumulative += size
+                    adjusted_cumulative_sizes.append(cumulative)
+            self.cumulative_sizes = adjusted_cumulative_sizes
+            # Adjust file lists and sizes
+            last_idx = len(self.cumulative_sizes)
+            self.file_list = self.file_list[:last_idx]
+            self.file_sizes = self.file_sizes[:last_idx]
+        else:
+            self.total_samples = total_samples
+
+        # Initialize file handles dictionary
+        self.file_handles = None
+        print(f"total samples: {self.total_samples}")
+        print(f"number of files: {len(self.file_list)}")
 
     def __len__(self):
-        return self.x.shape[0]
+        return self.total_samples
 
     def __getitem__(self, idx):
-        return (self.x[idx], self.particle_features[idx], self.subjets[idx],
-                self.particle_indices[idx], self.subjet_mask[idx], self.particle_mask[idx])
+        if idx < 0 or idx >= self.total_samples:
+            raise IndexError("Index out of range")
+
+        # Initialize file handles per worker
+        if self.file_handles is None:
+            self.file_handles = {}
+            worker_info = torch.utils.data.get_worker_info()
+            if worker_info is not None:
+                self.worker_id = worker_info.id
+            else:
+                self.worker_id = 0  # Single-process data loading
+            # Open all files for this worker
+            for file_path in self.file_list:
+                self.file_handles[file_path] = h5py.File(file_path, "r")
+
+        # Find the file index and local index within the file
+        file_idx = np.searchsorted(self.cumulative_sizes, idx + 1)
+        if file_idx == 0:
+            local_idx = idx
+        else:
+            local_idx = idx - self.cumulative_sizes[file_idx - 1]
+
+        file_path = self.file_list[file_idx]
+        file = self.file_handles[file_path]
+
+        # Retrieve the data
+        x = file["x"][local_idx]
+        particle_features = file["particle_features"][local_idx]
+        subjets = file["subjets"][local_idx]
+        particle_indices = file["particle_indices"][local_idx]
+        subjet_mask = file["subjet_mask"][local_idx]
+        particle_mask = file["particle_mask"][local_idx]
+
+        return (
+            x,
+            particle_features,
+            subjets,
+            particle_indices,
+            subjet_mask,
+            particle_mask,
+        )
+
+    def __del__(self):
+        # Close all open file handles
+        if self.file_handles is not None:
+            for f in self.file_handles.values():
+                f.close()
