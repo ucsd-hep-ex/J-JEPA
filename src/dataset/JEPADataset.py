@@ -12,6 +12,7 @@ class JEPADataset(Dataset):
         self.file_sizes = []
         self.cumulative_sizes = []
         total_samples = 0
+        print()
 
         # Gather all HDF5 files in the directory
         for filename in os.listdir(directory_path):
@@ -49,6 +50,8 @@ class JEPADataset(Dataset):
 
         # Initialize file handles dictionary
         self.file_handles = None
+        print(f"total samples: {self.total_samples}")
+        print(f"number of files: {len(self.file_list)}")
 
     def __len__(self):
         return self.total_samples
