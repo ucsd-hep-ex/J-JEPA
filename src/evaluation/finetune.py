@@ -253,6 +253,7 @@ def main(args):
     loss_train_all = []
     loss_val_all = []
     acc_val_all = []
+    need_particle_masks = "att" in options.embedding_layers_type.lower()
 
     for epoch in range(args.n_epochs):
         # re-batch the data on each epoch
@@ -270,7 +271,9 @@ def main(args):
         # the inner loop goes through the dataset batch by batch
         proj.train()
         pbar = tqdm(train_dataloader)
-        for i, (x, _, subjets, _, subjet_mask, _, labels) in enumerate(pbar):
+        for i, (x, _, subjets, _, subjet_mask, particle_mask, labels) in enumerate(
+            pbar
+        ):
             optimizer.zero_grad()
 
             y = labels.to(args.device)
@@ -281,6 +284,9 @@ def main(args):
                 batch,
                 subjet_mask.to(args.device),
                 subjets_meta=subjets.to(args.device),
+                particle_mask=(
+                    particle_mask.to(args.device) if need_particle_masks else None
+                ),
                 split_mask=None,
             )
             if args.flatten:
@@ -307,7 +313,9 @@ def main(args):
         with torch.no_grad():
             proj.eval()
             pbar = tqdm(val_dataloader)
-            for i, (x, _, subjets, _, subjet_mask, _, labels) in enumerate(pbar):
+            for i, (x, _, subjets, _, subjet_mask, particle_mask, labels) in enumerate(
+                pbar
+            ):
                 y = labels.to(args.device)
                 x = x.view(x.shape[0], x.shape[1], -1)
                 x = x.to(args.device)
@@ -316,6 +324,9 @@ def main(args):
                     batch,
                     subjet_mask.to(args.device),
                     subjets_meta=subjets.to(args.device),
+                    particle_mask=(
+                        particle_mask.to(args.device) if need_particle_masks else None
+                    ),
                     split_mask=None,
                 )
                 if args.flatten:
