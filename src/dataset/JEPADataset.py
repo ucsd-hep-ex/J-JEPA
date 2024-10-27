@@ -14,9 +14,6 @@ class JEPADataset(Dataset):
         self.total_samples = 0
         self.num_jets = num_jets
 
-        self._load_dataset_info()
-        self._adjust_dataset_size()
-
         print(
             f"Initialized JEPADataset with {self.total_samples} samples from {len(self.file_list)} files."
         )
