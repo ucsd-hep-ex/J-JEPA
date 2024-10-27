@@ -372,6 +372,8 @@ def main(rank, world_size, args):
         logger.info("Epoch %d" % (epoch + 1))
         logger.info("lr: %f" % scheduler.get_last_lr()[0])
 
+        epoch_start_time = time.time()
+
         if train_sampler:
             train_sampler.set_epoch(epoch)
         if val_sampler:
@@ -503,6 +505,7 @@ def main(rank, world_size, args):
                     masked_context_reps = context_repr * context_mask_expanded
                     target_mask_expanded = target_subjets_mask.unsqueeze(-1)
                     masked_target_reps = target_repr * target_mask_expanded
+                    cov_loss, var_loss = 0, 0
                     if options.cov_loss_weight > 0:
                         cov_loss = (
                             covariance_loss(target_repr) / 2
@@ -564,6 +567,9 @@ def main(rank, world_size, args):
                     f"mse loss: {mse_loss_meter_train.avg:+.3f}, cov loss: {cov_loss_meter_train.avg:+.3f}, var loss: {var_loss_meter_train.avg:+.3f}"
                 )
                 log_gpu_stats(device)
+
+        train_time_end = time.time()
+        logger.info(f"Training time: {train_time_end - epoch_start_time:.1f} s")
 
         # validation
         pbar_v = tqdm(
@@ -758,6 +764,10 @@ def main(rank, world_size, args):
         np.save(os.path.join(args.output_dir, "val_cov_losses.npy"), cov_losses_val)
         np.save(os.path.join(args.output_dir, "train_var_losses.npy"), var_losses_train)
         np.save(os.path.join(args.output_dir, "val_var_losses.npy"), var_losses_val)
+
+        epoch_end_time = time.time()
+        logger.info(f"Validation time: {epoch_end_time - train_time_end:.1f} s")
+        logger.info(f"Epoch time: {epoch_end_time - epoch_start_time:.1f} s")
 
 
 if __name__ == "__main__":
