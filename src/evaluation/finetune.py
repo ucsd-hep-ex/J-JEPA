@@ -271,7 +271,7 @@ def main(args):
         # the inner loop goes through the dataset batch by batch
         proj.train()
         pbar = tqdm(train_dataloader)
-        for i, (x, _, subjets, _, subjet_mask, particle_mask, labels) in enumerate(
+        for i, (x, _, subjets, _, subjet_mask, particle_masks, labels) in enumerate(
             pbar
         ):
             optimizer.zero_grad()
@@ -284,8 +284,8 @@ def main(args):
                 batch,
                 subjet_mask.to(args.device),
                 subjets_meta=subjets.to(args.device),
-                particle_mask=(
-                    particle_mask.to(args.device) if need_particle_masks else None
+                particle_masks=(
+                    particle_masks.to(args.device) if need_particle_masks else None
                 ),
                 split_mask=None,
             )
@@ -313,7 +313,7 @@ def main(args):
         with torch.no_grad():
             proj.eval()
             pbar = tqdm(val_dataloader)
-            for i, (x, _, subjets, _, subjet_mask, particle_mask, labels) in enumerate(
+            for i, (x, _, subjets, _, subjet_mask, particle_masks, labels) in enumerate(
                 pbar
             ):
                 y = labels.to(args.device)
@@ -324,8 +324,8 @@ def main(args):
                     batch,
                     subjet_mask.to(args.device),
                     subjets_meta=subjets.to(args.device),
-                    particle_mask=(
-                        particle_mask.to(args.device) if need_particle_masks else None
+                    particle_masks=(
+                        particle_masks.to(args.device) if need_particle_masks else None
                     ),
                     split_mask=None,
                 )
