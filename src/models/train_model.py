@@ -70,6 +70,12 @@ def parse_args():
         default=1,
         help="whether to use positional embedding in the encoder",
     )
+    parser.add_argument(
+        "--pos-emb-type",
+        type=str,
+        default="space",
+        help="Type of positional embedding to use, choose between pt and space",
+    )
     return parser.parse_args()
 
 
@@ -269,6 +275,7 @@ def main(rank, world_size, args):
     logger.info(f"covariance loss weight: {options.cov_loss_weight}")
     logger.info(f"variance loss weight: {options.var_loss_weight}")
     logger.info(f"use encoder positional embedding: {bool(options.encoder_pos_emb)}")
+    logger.info(f"using positional embedding type: {args.pos_emb_type}")
 
     model = JJEPA(options).to(device)
     logger.info(model)

@@ -7,6 +7,7 @@ from src.layers import create_embedding_layers, create_predictor_embedding_layer
 from src.layers.linear_block.activations import create_activation
 from src.layers.embedding_stack import EmbeddingStack, PredictorEmbeddingStack
 from src.util import create_pos_emb_fn
+from src.util.pt_pos_emb import create_pt_pos_emb_fn
 from src.options import Options
 from src.util.tensors import trunc_normal_
 from src.util.DimensionCheckLayer import DimensionCheckLayer
@@ -67,7 +68,7 @@ class Attention(nn.Module):
         # attn = attn.softmax(dim=-1)
         # attn = self.attn_drop(attn)
         # x = (attn @ v).transpose(1, 2).reshape(B, N, C)
-        x, _ = self.multihead_attn(q, k, v, key_padding_mask=subjet_masks==0)
+        x, _ = self.multihead_attn(q, k, v, key_padding_mask=subjet_masks == 0)
 
         x = self.proj_drop(x)
         if self.options.debug:
@@ -143,7 +144,10 @@ class JetsTransformer(nn.Module):
         norm_layer = NORM_LAYERS.get(options.normalization, nn.LayerNorm)
         self.num_part_ftr = options.num_part_ftr
         self.embed_dim = options.emb_dim
-        self.calc_pos_emb = create_pos_emb_fn(options, options.emb_dim)
+        if options.pos_emb_type == "pt":
+            self.calc_pos_emb = create_pt_pos_emb_fn(options.emb_dim)
+        else:
+            self.calc_pos_emb = create_pos_emb_fn(options, options.emb_dim)
 
         # Adjust the input dimensions based on the new input shape
         print("num_particles", options.num_particles)
@@ -235,9 +239,10 @@ class JetsTransformerPredictor(nn.Module):
         self.predictor_embed = create_predictor_embedding_layers(
             options, input_dim=options.emb_dim
         )
-        self.calc_predictor_pos_emb = create_pos_emb_fn(
-            options, options.predictor_emb_dim
-        )
+        if options.pos_emb_type == "pt":
+            self.calc_pos_emb = create_pt_pos_emb_fn(options.emb_dim)
+        else:
+            self.calc_pos_emb = create_pos_emb_fn(options, options.emb_dim)
 
         options.repr_dim = options.predictor_emb_dim
         options.attn_dim = options.repr_dim
@@ -330,7 +335,7 @@ class JJEPA(nn.Module):
         self.use_predictor = options.use_predictor
         self.context_transformer = JetsTransformer(options)
         self.target_transformer = copy.deepcopy(self.context_transformer)
-        self.need_particle_masks = ('att' in options.embedding_layers_type.lower())
+        self.need_particle_masks = "att" in options.embedding_layers_type.lower()
         for param in self.target_transformer.parameters():
             param.requires_grad = False
         if self.use_predictor:
@@ -366,15 +371,13 @@ class JJEPA(nn.Module):
         if self.options.debug:
             print(f"JJEPA forward pass")
 
-
-
         if self.need_particle_masks:
             context_repr = self.context_transformer(
                 full_jet,
                 full_jet["subjet_mask"],
                 full_jet["subjets"],
                 context["split_mask"],
-                full_jet['particle_mask']
+                full_jet["particle_mask"],
             )
 
             # Debug Statement
@@ -382,7 +385,11 @@ class JJEPA(nn.Module):
                 context_repr = self.context_check(context_repr)
 
             target_repr = self.target_transformer(
-                full_jet, full_jet["subjet_mask"], full_jet["subjets"], target["split_mask"], full_jet["particle_mask"]
+                full_jet,
+                full_jet["subjet_mask"],
+                full_jet["subjets"],
+                target["split_mask"],
+                full_jet["particle_mask"],
             )
         else:
             context_repr = self.context_transformer(
@@ -397,7 +404,10 @@ class JJEPA(nn.Module):
                 context_repr = self.context_check(context_repr)
 
             target_repr = self.target_transformer(
-                full_jet, full_jet["subjet_mask"], full_jet["subjets"], target["split_mask"]
+                full_jet,
+                full_jet["subjet_mask"],
+                full_jet["subjets"],
+                target["split_mask"],
             )
         if self.use_predictor:
             # TODO: update the input to the model x, subjet_mask, target_subjet_ftrs, context_subjet_ftrs):
