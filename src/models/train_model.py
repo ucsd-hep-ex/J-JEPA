@@ -64,6 +64,18 @@ def parse_args():
         default=1,
         help="flatten reps when calculating variance loss",
     )
+    parser.add_argument(
+        "--encoder_pos_emb",
+        type=int,
+        default=1,
+        help="whether to use positional embedding in the encoder",
+    )
+    parser.add_argument(
+        "--pos-emb-type",
+        type=str,
+        default="space",
+        help="Type of positional embedding to use, choose between pt and space",
+    )
     return parser.parse_args()
 
 
@@ -97,27 +109,37 @@ def setup_data_loader(options, data_path, world_size, rank, tag="train"):
 
 
 def create_random_masks(batch_size, num_subjets, device, context_scale=0.7):
+    """_summary_
+    Selects a random subset of subjets to be used as context and target subjets
+    For target subjets it selects a random subset of numbers from 0-9
+    While for the context subjets it selects from the whole range of 0-19
+    """
     context_masks = []
     target_masks = []
 
-    # print("Batch size", batch_size)
-
     for _ in range(batch_size):
-        indices = torch.randperm(num_subjets, device=device)
+        # Target selection from 0-9
+        num_targets = int(num_subjets * (1 - context_scale))  # how many targets we want
+        target_perm = torch.randperm(10, device=device)  # shuffle numbers 0-9
+        target_indices = target_perm[:num_targets]  # take first num_targets indices
+
+        # Context selection from the remaining indices
+        remaining_indices = torch.tensor(
+            [i for i in range(num_subjets) if i not in target_indices], device=device
+        )
         context_size = int(num_subjets * context_scale)
-        context_indices = indices[:context_size]
-        target_indices = indices[context_size:]
+        context_indices = remaining_indices[:context_size]
+        # Create masks
+        context_mask = torch.zeros(num_subjets, dtype=torch.bool, device=device)
+        target_mask = torch.zeros(num_subjets, dtype=torch.bool, device=device)
 
-        context_mask = torch.zeros(num_subjets, device=device)
-        target_mask = torch.zeros(num_subjets, device=device)
-
-        context_mask[context_indices] = 1
-        target_mask[target_indices] = 1
+        context_mask[context_indices] = True
+        target_mask[target_indices] = True
 
         context_masks.append(context_mask)
         target_masks.append(target_mask)
 
-    return torch.stack(context_masks).bool(), torch.stack(target_masks).bool()
+    return torch.stack(context_masks), torch.stack(target_masks)
 
 
 def save_checkpoint(model, optimizer, epoch, loss_train, loss_val, output_dir):
@@ -128,10 +150,9 @@ def save_checkpoint(model, optimizer, epoch, loss_train, loss_val, output_dir):
         "training loss": loss_train,
         "validation loss": loss_val,
     }
+    epoch_str = f"epoch_{epoch + 1}" if epoch != "best" else "best"
 
-    torch.save(
-        checkpoint, os.path.join(output_dir, f"checkpoint_epoch_{epoch + 1}.pth")
-    )
+    torch.save(checkpoint, os.path.join(output_dir, f"checkpoint_{epoch_str}.pth"))
 
 
 # Create a logger
@@ -247,11 +268,14 @@ def main(rank, world_size, args):
     options.num_steps_per_epoch = options.num_jets // options.batch_size
     options.cov_loss_weight = args.cov_loss_weight
     options.var_loss_weight = args.var_loss_weight
+    options.encoder_pos_emb = args.encoder_pos_emb
 
     setup_logging(rank, args.output_dir)
     logger.info(f"Initialized (rank/world-size) {rank}/{world_size}")
     logger.info(f"covariance loss weight: {options.cov_loss_weight}")
     logger.info(f"variance loss weight: {options.var_loss_weight}")
+    logger.info(f"use encoder positional embedding: {bool(options.encoder_pos_emb)}")
+    logger.info(f"using positional embedding type: {args.pos_emb_type}")
 
     model = JJEPA(options).to(device)
     logger.info(model)
@@ -354,6 +378,8 @@ def main(rank, world_size, args):
     for epoch in range(options.start_epochs, options.num_epochs):
         logger.info("Epoch %d" % (epoch + 1))
         logger.info("lr: %f" % scheduler.get_last_lr()[0])
+
+        epoch_start_time = time.time()
 
         if train_sampler:
             train_sampler.set_epoch(epoch)
@@ -486,6 +512,7 @@ def main(rank, world_size, args):
                     masked_context_reps = context_repr * context_mask_expanded
                     target_mask_expanded = target_subjets_mask.unsqueeze(-1)
                     masked_target_reps = target_repr * target_mask_expanded
+                    cov_loss, var_loss = 0, 0
                     if options.cov_loss_weight > 0:
                         cov_loss = (
                             covariance_loss(target_repr) / 2
@@ -547,6 +574,9 @@ def main(rank, world_size, args):
                     f"mse loss: {mse_loss_meter_train.avg:+.3f}, cov loss: {cov_loss_meter_train.avg:+.3f}, var loss: {var_loss_meter_train.avg:+.3f}"
                 )
                 log_gpu_stats(device)
+
+        train_time_end = time.time()
+        logger.info(f"Training time: {train_time_end - epoch_start_time:.1f} s")
 
         # validation
         pbar_v = tqdm(
@@ -725,6 +755,14 @@ def main(rank, world_size, args):
                 model.state_dict(),
                 os.path.join(args.output_dir, "best_model.pth"),
             )
+            save_checkpoint(
+                model,
+                optimizer,
+                "best",
+                loss_meter_train.avg,
+                loss_meter_val,
+                args.output_dir,
+            )
         np.save(os.path.join(args.output_dir, "train_losses.npy"), losses_train)
         np.save(os.path.join(args.output_dir, "val_losses.npy"), losses_val)
         np.save(os.path.join(args.output_dir, "train_mse_losses.npy"), mse_losses_train)
@@ -733,6 +771,10 @@ def main(rank, world_size, args):
         np.save(os.path.join(args.output_dir, "val_cov_losses.npy"), cov_losses_val)
         np.save(os.path.join(args.output_dir, "train_var_losses.npy"), var_losses_train)
         np.save(os.path.join(args.output_dir, "val_var_losses.npy"), var_losses_val)
+
+        epoch_end_time = time.time()
+        logger.info(f"Validation time: {epoch_end_time - train_time_end:.1f} s")
+        logger.info(f"Epoch time: {epoch_end_time - epoch_start_time:.1f} s")
 
 
 if __name__ == "__main__":
