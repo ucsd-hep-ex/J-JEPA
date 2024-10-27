@@ -14,10 +14,6 @@ class JEPADataset(Dataset):
         self.total_samples = 0
         self.num_jets = num_jets
 
-        print(
-            f"Initialized JEPADataset with {self.total_samples} samples from {len(self.file_list)} files."
-        )
-
         # Gather all HDF5 files in the directory
         for filename in os.listdir(directory_path):
             if filename.endswith(".hdf5") or filename.endswith(".h5"):
@@ -53,8 +49,9 @@ class JEPADataset(Dataset):
 
         # Initialize file handles dictionary
         self.file_handles = None
-        print(f"total samples: {self.total_samples}")
-        print(f"number of files: {len(self.file_list)}")
+        print(
+            f"Initialized JEPADataset with {self.total_samples} samples from {len(self.file_list)} files from {self.directory_path}."
+        )
 
     def __len__(self):
         return self.total_samples
