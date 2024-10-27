@@ -29,13 +29,12 @@ class JEPADataset(Dataset):
                     num_samples = file["x"].shape[0]  # Adjust 'x' to your dataset's key
                 self.file_list.append(file_path)
                 self.file_sizes.append(num_samples)
-                total_samples += num_samples
-                self.cumulative_sizes.append(total_samples)
+                self.total_samples += num_samples
+                self.cumulative_sizes.append(self.total_samples)
 
         # If num_jets is specified, adjust the total number of samples and cumulative sizes
         if num_jets is not None:
-            total_samples = min(total_samples, num_jets)
-            self.total_samples = total_samples
+            self.total_samples = min(self.total_samples, num_jets)
 
             # Adjust cumulative sizes to reflect num_jets
             adjusted_cumulative_sizes = []
@@ -106,8 +105,11 @@ class JEPADataset(Dataset):
             particle_mask,
         )
 
-    def __del__(self):
-        # Close all open file handles
+    def close(self):
         if self.file_handles is not None:
             for f in self.file_handles.values():
                 f.close()
+        self.file_handles = None
+
+    def __del__(self):
+        self.close()
