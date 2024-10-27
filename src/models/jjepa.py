@@ -240,9 +240,13 @@ class JetsTransformerPredictor(nn.Module):
             options, input_dim=options.emb_dim
         )
         if options.pos_emb_type == "pt":
-            self.calc_predictor_pos_emb = create_pt_pos_emb_fn(options.emb_dim)
+            self.calc_predictor_pos_emb = create_pt_pos_emb_fn(
+                options.predictor_emb_dim
+            )
         else:
-            self.calc_predictor_pos_emb = create_pos_emb_fn(options, options.emb_dim)
+            self.calc_predictor_pos_emb = create_pos_emb_fn(
+                options, options.predictor_emb_dim
+            )
 
         options.repr_dim = options.predictor_emb_dim
         options.attn_dim = options.repr_dim
