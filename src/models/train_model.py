@@ -144,10 +144,9 @@ def save_checkpoint(model, optimizer, epoch, loss_train, loss_val, output_dir):
         "training loss": loss_train,
         "validation loss": loss_val,
     }
+    epoch_str = f"epoch_{epoch + 1}" if epoch != "best" else "best"
 
-    torch.save(
-        checkpoint, os.path.join(output_dir, f"checkpoint_epoch_{epoch + 1}.pth")
-    )
+    torch.save(checkpoint, os.path.join(output_dir, f"checkpoint_{epoch_str}.pth"))
 
 
 # Create a logger
@@ -742,6 +741,14 @@ def main(rank, world_size, args):
             torch.save(
                 model.state_dict(),
                 os.path.join(args.output_dir, "best_model.pth"),
+            )
+            save_checkpoint(
+                model,
+                optimizer,
+                "best",
+                loss_meter_train.avg,
+                loss_meter_val,
+                args.output_dir,
             )
         np.save(os.path.join(args.output_dir, "train_losses.npy"), losses_train)
         np.save(os.path.join(args.output_dir, "val_losses.npy"), losses_val)
