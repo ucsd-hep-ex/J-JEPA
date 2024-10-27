@@ -70,6 +70,12 @@ def parse_args():
         default=1,
         help="whether to use positional embedding in the encoder",
     )
+    parser.add_argument(
+        "--pos-emb-type",
+        type=str,
+        default="space",
+        help="Type of positional embedding to use, choose between pt and space",
+    )
     return parser.parse_args()
 
 
@@ -144,10 +150,9 @@ def save_checkpoint(model, optimizer, epoch, loss_train, loss_val, output_dir):
         "training loss": loss_train,
         "validation loss": loss_val,
     }
+    epoch_str = f"epoch_{epoch + 1}" if epoch != "best" else "best"
 
-    torch.save(
-        checkpoint, os.path.join(output_dir, f"checkpoint_epoch_{epoch + 1}.pth")
-    )
+    torch.save(checkpoint, os.path.join(output_dir, f"checkpoint_{epoch_str}.pth"))
 
 
 # Create a logger
@@ -270,6 +275,7 @@ def main(rank, world_size, args):
     logger.info(f"covariance loss weight: {options.cov_loss_weight}")
     logger.info(f"variance loss weight: {options.var_loss_weight}")
     logger.info(f"use encoder positional embedding: {bool(options.encoder_pos_emb)}")
+    logger.info(f"using positional embedding type: {args.pos_emb_type}")
 
     model = JJEPA(options).to(device)
     logger.info(model)
@@ -372,6 +378,8 @@ def main(rank, world_size, args):
     for epoch in range(options.start_epochs, options.num_epochs):
         logger.info("Epoch %d" % (epoch + 1))
         logger.info("lr: %f" % scheduler.get_last_lr()[0])
+
+        epoch_start_time = time.time()
 
         if train_sampler:
             train_sampler.set_epoch(epoch)
@@ -504,6 +512,7 @@ def main(rank, world_size, args):
                     masked_context_reps = context_repr * context_mask_expanded
                     target_mask_expanded = target_subjets_mask.unsqueeze(-1)
                     masked_target_reps = target_repr * target_mask_expanded
+                    cov_loss, var_loss = 0, 0
                     if options.cov_loss_weight > 0:
                         cov_loss = (
                             covariance_loss(target_repr) / 2
@@ -565,6 +574,9 @@ def main(rank, world_size, args):
                     f"mse loss: {mse_loss_meter_train.avg:+.3f}, cov loss: {cov_loss_meter_train.avg:+.3f}, var loss: {var_loss_meter_train.avg:+.3f}"
                 )
                 log_gpu_stats(device)
+
+        train_time_end = time.time()
+        logger.info(f"Training time: {train_time_end - epoch_start_time:.1f} s")
 
         # validation
         pbar_v = tqdm(
@@ -743,6 +755,14 @@ def main(rank, world_size, args):
                 model.state_dict(),
                 os.path.join(args.output_dir, "best_model.pth"),
             )
+            save_checkpoint(
+                model,
+                optimizer,
+                "best",
+                loss_meter_train.avg,
+                loss_meter_val,
+                args.output_dir,
+            )
         np.save(os.path.join(args.output_dir, "train_losses.npy"), losses_train)
         np.save(os.path.join(args.output_dir, "val_losses.npy"), losses_val)
         np.save(os.path.join(args.output_dir, "train_mse_losses.npy"), mse_losses_train)
@@ -751,6 +771,10 @@ def main(rank, world_size, args):
         np.save(os.path.join(args.output_dir, "val_cov_losses.npy"), cov_losses_val)
         np.save(os.path.join(args.output_dir, "train_var_losses.npy"), var_losses_train)
         np.save(os.path.join(args.output_dir, "val_var_losses.npy"), var_losses_val)
+
+        epoch_end_time = time.time()
+        logger.info(f"Validation time: {epoch_end_time - train_time_end:.1f} s")
+        logger.info(f"Epoch time: {epoch_end_time - epoch_start_time:.1f} s")
 
 
 if __name__ == "__main__":

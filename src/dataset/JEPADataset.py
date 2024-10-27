@@ -14,10 +14,6 @@ class JEPADataset(Dataset):
         self.total_samples = 0
         self.num_jets = num_jets
 
-        print(
-            f"Initialized JEPADataset with {self.total_samples} samples from {len(self.file_list)} files."
-        )
-
         # Gather all HDF5 files in the directory
         for filename in os.listdir(directory_path):
             if filename.endswith(".hdf5") or filename.endswith(".h5"):
@@ -26,13 +22,12 @@ class JEPADataset(Dataset):
                     num_samples = file["x"].shape[0]  # Adjust 'x' to your dataset's key
                 self.file_list.append(file_path)
                 self.file_sizes.append(num_samples)
-                total_samples += num_samples
-                self.cumulative_sizes.append(total_samples)
+                self.total_samples += num_samples
+                self.cumulative_sizes.append(self.total_samples)
 
         # If num_jets is specified, adjust the total number of samples and cumulative sizes
         if num_jets is not None:
-            total_samples = min(total_samples, num_jets)
-            self.total_samples = total_samples
+            self.total_samples = min(self.total_samples, num_jets)
 
             # Adjust cumulative sizes to reflect num_jets
             adjusted_cumulative_sizes = []
@@ -54,8 +49,9 @@ class JEPADataset(Dataset):
 
         # Initialize file handles dictionary
         self.file_handles = None
-        print(f"total samples: {self.total_samples}")
-        print(f"number of files: {len(self.file_list)}")
+        print(
+            f"Initialized JEPADataset with {self.total_samples} samples from {len(self.file_list)} files from {self.directory_path}."
+        )
 
     def __len__(self):
         return self.total_samples
@@ -103,8 +99,11 @@ class JEPADataset(Dataset):
             particle_mask,
         )
 
-    def __del__(self):
-        # Close all open file handles
+    def close(self):
         if self.file_handles is not None:
             for f in self.file_handles.values():
                 f.close()
+        self.file_handles = None
+
+    def __del__(self):
+        self.close()
