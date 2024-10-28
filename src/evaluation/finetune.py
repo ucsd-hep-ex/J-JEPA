@@ -161,19 +161,8 @@ def main(args):
         while True:
             trial_dir = os.path.join(out_dir, f"trial-{trial_num}")
 
-            # Check if directory exists
+            # Check if directory doesn't exist
             if not os.path.isdir(trial_dir):
-                out_dir = trial_dir
-                break
-
-            # List all items in the directory
-            contents = os.listdir(trial_dir)
-
-            # Filter out txt files
-            non_txt_files = [file for file in contents if not file.endswith(".txt")]
-
-            # If directory is empty or only contains txt files, use this directory
-            if not non_txt_files:
                 out_dir = trial_dir
                 break
 
