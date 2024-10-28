@@ -156,20 +156,19 @@ def main(args):
     args.learning_rate = 0.00005 * args.batch_size / 128
 
     # check if experiment already exists and is not empty
+    if not args.from_checkpoint:
+        trial_num = 0
+        while True:
+            trial_dir = os.path.join(out_dir, f"trial-{trial_num}")
 
-    if not args.from_checkpoint and os.path.isdir(out_dir):
-        # List all items in the directory
-        contents = os.listdir(out_dir)
+            # Check if directory doesn't exist
+            if not os.path.isdir(trial_dir):
+                out_dir = trial_dir
+                break
 
-        # Filter out log files
-        non_log_files = [file for file in contents if file.endswith(".pth")]
+            trial_num += 1
 
-        # Check if there are files other than log files
-        if non_log_files:
-            sys.exit(
-                "ERROR: experiment already exists and contains files other than log files; don't want to overwrite it by mistake"
-            )
-        # This will create the directory if it does not exist or if it is empty
+    # Create the directory
     os.makedirs(out_dir, exist_ok=True)
 
     # initialise logfile
