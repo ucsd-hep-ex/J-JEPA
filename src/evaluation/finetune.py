@@ -55,7 +55,9 @@ def Projector(mlp, embedding):
 # load data
 def load_data(args, dataset_path, tag=None):
     # data_dir = f"{dataset_path}/{flag}/processed/4_features"
-    num_jets = 100 * 1000
+    num_jets = None
+    if args.small:
+        num_jets = 100 * 1000
     datset = JetDataset(dataset_path, labels=True, num_jets=num_jets)
     dataloader = DataLoader(datset, batch_size=args.batch_size, shuffle=True)
     return dataloader
@@ -618,6 +620,14 @@ if __name__ == "__main__":
         dest="from_checkpoint",
         default=0,
         help="whether to start from a checkpoint",
+    )
+    parser.add_argument(
+        "--small",
+        type=int,
+        action="store",
+        dest="small",
+        default=1,
+        help="whether to use a small dataset (10%) for finetuning",
     )
 
     args = parser.parse_args()
