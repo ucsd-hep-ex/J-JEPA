@@ -214,6 +214,16 @@ def main(args):
     print("loading data")
     train_dataloader = load_data(args, args.train_dataset_path, "train")
     val_dataloader = load_data(args, args.val_dataset_path, "val")
+    if args.small:
+        print("using small dataset for finetuning", file=logfile, flush=True)
+        print(
+            f"number of jets: {len(train_dataloader.dataset)}", file=logfile, flush=True
+        )
+    else:
+        print("using full dataset for finetuning", file=logfile, flush=True)
+        print(
+            f"number of jets: {len(train_dataloader.dataset)}", file=logfile, flush=True
+        )
 
     t1 = time.time()
 
