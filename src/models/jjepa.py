@@ -191,7 +191,7 @@ class JetsTransformer(nn.Module):
         sj_phi_star = torch.sin(sj_phi / 2)
 
         # shift eta to avoid negative positions
-        sj_eta += 3
+        sj_eta = sj_eta + 3
 
         # calculate embedding
         emb_phi = self.phi_emb_layers(sj_phi_star)
@@ -239,11 +239,13 @@ class JetsTransformer(nn.Module):
         if self.options.encoder_pos_emb:
             if self.use_learnable_space_emb:
                 pos_emb = self.calc_learnable_space_embedding(subjets_meta)
+                x = x + pos_emb
             else:
                 pos_emb = self.calc_pos_emb(subjets_meta)
+                x += pos_emb
             if self.options.debug:
                 print(pos_emb.shape)
-            x += pos_emb
+
 
         # forward prop
         for blk in self.blocks:
@@ -324,7 +326,7 @@ class JetsTransformerPredictor(nn.Module):
         sj_phi_star = torch.sin(sj_phi / 2)
 
         # shift eta to avoid negative positions
-        sj_eta += 3
+        sj_eta = sj_eta + 3
 
         # calculate embedding
         emb_phi = self.phi_emb_layers(sj_phi_star)
@@ -367,7 +369,7 @@ class JetsTransformerPredictor(nn.Module):
 
         if self.use_learnable_space_emb:
             # calcualte context positional embedding
-            x += self.calc_learnable_space_embedding(context_subjet_ftrs)
+            x = x + self.calc_learnable_space_embedding(context_subjet_ftrs)
             # prepare position embeddings for target subjets
             # (B, N_trgt, N_ftr) -> (B, N_trgt, D)
             trgt_pos_emb = self.calc_learnable_space_embedding(target_subjet_ftrs)
