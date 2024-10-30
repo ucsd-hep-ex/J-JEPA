@@ -31,7 +31,7 @@ from sklearn import metrics
 
 from src.models.jjepa import JJEPA
 from src.options import Options
-from src.dataset.JetDataset import JetDataset
+from src.dataset.JEPADataset import JEPADataset
 from src.evaluation.ClassificationHead import ClassificationHead
 
 
@@ -54,12 +54,12 @@ def Projector(mlp, embedding):
 
 # load data
 def load_data(args, dataset_path, tag=None):
-    # data_dir = f"{dataset_path}/{flag}/processed/4_features"
+    """Load data using JEPADataset"""
     num_jets = None
     if args.small:
         num_jets = 100 * 1000
-    datset = JetDataset(dataset_path, labels=True, num_jets=num_jets)
-    dataloader = DataLoader(datset, batch_size=args.batch_size, shuffle=True)
+    dataset = JEPADataset(dataset_path, num_jets=num_jets, labels=True)
+    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
     return dataloader
 
 
@@ -102,21 +102,6 @@ def find_nearest(array, value):
     array = np.asarray(array)
     idx = (np.abs(array - value)).argmin()
     return array[idx]
-
-
-# def get_perf_stats(labels, measures):
-#     measures = np.nan_to_num(measures)
-#     auc = metrics.roc_auc_score(labels, measures)
-#     fpr, tpr, _ = metrics.roc_curve(labels, measures)
-#     fpr2 = [fpr[i] for i in range(len(fpr)) if tpr[i] >= 0.5]
-#     tpr2 = [tpr[i] for i in range(len(tpr)) if tpr[i] >= 0.5]
-#     try:
-#         imtafe = np.nan_to_num(
-#             1 / fpr2[list(tpr2).index(find_nearest(list(tpr2), 0.5))]
-#         )
-#     except:
-#         imtafe = 1
-#     return auc, imtafe
 
 
 def get_perf_stats(labels, measures):
@@ -314,24 +299,23 @@ def main(args):
         # the inner loop goes through the dataset batch by batch
         proj.train()
         pbar = tqdm(train_dataloader)
-        for i, (x, _, subjets, _, subjet_mask, particle_masks, labels) in enumerate(
-            pbar
-        ):
+        for i, (x, _, subjets, _, subjet_mask, particle_mask, labels) in enumerate(pbar):
             optimizer.zero_grad()
-            y = labels.to(args.device)
-            subjet_mask = subjet_mask.to(args.device)
+            
+            # Prepare input data
             x = x.view(x.shape[0], x.shape[1], -1)
             x = x.to(args.device)
-            batch = {"particles": x.to(torch.float32)}
-            reps = net(
-                batch,
-                subjet_mask,
-                subjets_meta=subjets.to(args.device),
-                particle_masks=(
-                    particle_masks.to(args.device) if need_particle_masks else None
-                ),
-                split_mask=None,
-            )
+            y = labels.to(args.device)
+            batch = {
+                "particles": x.to(torch.float32),
+                "particle_mask": particle_mask.to(args.device),
+                "subjet_mask": subjet_mask.to(args.device),
+                "subjets": subjets.to(args.device)
+            }
+
+            # Get representations from the model
+            reps = net(batch, None)  # No split mask needed for inference
+            
             if not args.cls:
                 if args.flatten:
                     reps = reps.view(reps.shape[0], -1)
@@ -342,6 +326,7 @@ def main(args):
                 out = proj(reps)
             else:
                 out = proj(reps.transpose(0, 1), padding_mask=subjet_mask == 0)
+
             batch_loss = loss(out, y.long()).to(args.device)
             batch_loss.backward()
             optimizer.step()
@@ -359,23 +344,21 @@ def main(args):
         with torch.no_grad():
             proj.eval()
             pbar = tqdm(val_dataloader)
-            for i, (x, _, subjets, _, subjet_mask, particle_masks, labels) in enumerate(
-                pbar
-            ):
-                y = labels.to(args.device)
-                subjet_mask = subjet_mask.to(args.device)
+            for i, (x, _, subjets, _, subjet_mask, particle_mask, labels) in enumerate(pbar):
+                # Prepare input data
                 x = x.view(x.shape[0], x.shape[1], -1)
                 x = x.to(args.device)
-                batch = {"particles": x.to(torch.float32)}
-                reps = net(
-                    batch,
-                    subjet_mask,
-                    subjets_meta=subjets.to(args.device),
-                    particle_masks=(
-                        particle_masks.to(args.device) if need_particle_masks else None
-                    ),
-                    split_mask=None,
-                )
+                y = labels.to(args.device)
+                batch = {
+                    "particles": x.to(torch.float32),
+                    "particle_mask": particle_mask.to(args.device),
+                    "subjet_mask": subjet_mask.to(args.device),
+                    "subjets": subjets.to(args.device)
+                }
+
+                # Get representations from the model
+                reps = net(batch, None)  # No split mask needed for inference
+                
                 if not args.cls:
                     if args.flatten:
                         reps = reps.view(reps.shape[0], -1)
@@ -386,6 +369,7 @@ def main(args):
                     out = proj(reps)
                 else:
                     out = proj(reps.transpose(0, 1), padding_mask=subjet_mask == 0)
+
                 batch_loss = loss(out, y.long()).detach().cpu().item()
                 losses_e_val.append(batch_loss)
                 predicted_e.append(softmax(out).cpu().data.numpy())
@@ -554,14 +538,14 @@ if __name__ == "__main__":
         "--train-dataset-path",
         type=str,
         action="store",
-        default="/ssl-jet-vol-v3/toptagging/processed",
+        default="/j-jepa-vol/J-JEPA/data/JetClass/subjet/processed/train",
         help="Input directory with the dataset",
     )
     parser.add_argument(
         "--val-dataset-path",
         type=str,
         action="store",
-        default="/ssl-jet-vol-v3/toptagging/processed",
+        default="/j-jepa-vol/J-JEPA/data/JetClass/subjet/processed/val",
         help="Input directory with the dataset",
     )
     parser.add_argument(
