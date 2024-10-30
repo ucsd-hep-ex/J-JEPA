@@ -43,7 +43,7 @@ def parse_args():
     parser.add_argument(
         "--load_checkpoint",
         type=str,
-        default=None,
+        default="best",
         help="Start training from a saved checkpoint",
     )
     parser.add_argument("--num_gpus", type=int, default=1, help="Number of gpus")
@@ -288,10 +288,15 @@ def main(rank, world_size, args):
     #     "validation loss": loss_val,
     # }
     checkpoint = {}
-    if args.load_checkpoint and Path(args.load_checkpoint).is_file():
-        checkpoint = torch.load(args.load_checkpoint, map_location=device)
+    checkpoint_path = (
+        os.path.join(out_dir, "checkpoint_best.pth")
+        if args.load_checkpoint == "best"
+        else args.load_checkpoint
+    )
+    if os.path.isfile(checkpoint_path):
+        checkpoint = torch.load(checkpoint_path, map_location=device)
         model.load_state_dict(checkpoint["model"])
-        logger.info(f"Loaded model from {args.load_checkpoint}")
+        logger.info(f"Loaded best checkpoint from {checkpoint_path}")
     if world_size > 1:
         model = DistributedDataParallel(model, device_ids=[rank])
 
@@ -353,7 +358,7 @@ def main(rank, world_size, args):
     )
     if checkpoint:
         optimizer.load_state_dict(checkpoint["optimizer"])
-        logger.info(f"Loaded optimizer state from {args.load_checkpoint}")
+        logger.info(f"Loaded optimizer state from {checkpoint_path}")
     # optimizer = optim.AdamW(
     #     model.parameters(), lr=options.lr, weight_decay=options.weight_decay
     # )
