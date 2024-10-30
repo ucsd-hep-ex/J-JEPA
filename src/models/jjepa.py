@@ -5,7 +5,7 @@ import torch.nn.functional as F
 
 from src.layers import create_embedding_layers, create_predictor_embedding_layers
 from src.layers.linear_block.activations import create_activation
-from src.layers.embedding_stack import EmbeddingStack, PredictorEmbeddingStack
+from src.layers.embedding_stack import EmbeddingStack, PredictorEmbeddingStack, LearnableEmbeddingStacks
 from src.util import create_pos_emb_fn
 from src.util.pt_pos_emb import create_pt_pos_emb_fn
 from src.options import Options
@@ -144,8 +144,16 @@ class JetsTransformer(nn.Module):
         norm_layer = NORM_LAYERS.get(options.normalization, nn.LayerNorm)
         self.num_part_ftr = options.num_part_ftr
         self.embed_dim = options.emb_dim
+        self.use_learnable_space_emb = False
         if options.pos_emb_type == "pt":
             self.calc_pos_emb = create_pt_pos_emb_fn(options.emb_dim)
+        elif options.pos_emb_type == "Learnable_Space":
+            self.use_learnable_space_emb = True
+            emb_dim = options.emb_dim
+            self.eta_emb_layers = LearnableEmbeddingStacks(input_dim=1, output_dim=emb_dim // 4)
+            self.phi_emb_layers = LearnableEmbeddingStacks(input_dim=1, output_dim=emb_dim // 4)
+            self.eta_phi_low_level_emb_layers = LearnableEmbeddingStacks(input_dim=2, output_dim=emb_dim // 4)
+            self.eta_phi_high_level_emb_layers = LearnableEmbeddingStacks(input_dim=emb_dim // 2, output_dim=emb_dim // 4)
         else:
             self.calc_pos_emb = create_pos_emb_fn(options, options.emb_dim)
 
@@ -174,6 +182,30 @@ class JetsTransformer(nn.Module):
         elif isinstance(m, nn.LayerNorm):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
+
+    def calc_learnable_space_embedding(self, subjet_ftrs):
+        sj_eta = subjet_ftrs[:, :, 1].unsqueeze(-1)
+        sj_phi = subjet_ftrs[:, :, 2].unsqueeze(-1)
+
+        # process phi to impose physical distance
+        sj_phi_star = torch.sin(sj_phi / 2)
+
+        # shift eta to avoid negative positions
+        sj_eta += 3
+
+        # calculate embedding
+        emb_phi = self.phi_emb_layers(sj_phi_star)
+        emb_eta = self.eta_emb_layers(sj_eta)
+        emb_low_level = self.eta_phi_low_level_emb_layers(
+                            torch.cat([sj_phi_star, sj_eta], axis=2)
+                        )
+        emb_high_level = self.eta_phi_high_level_emb_layers(
+                            torch.cat([emb_phi, emb_eta], axis=2)
+                        )
+
+        # print(emb_phi_star.shape)
+        emb = torch.cat([emb_phi, emb_eta, emb_low_level, emb_high_level], axis=2)
+        return emb
 
     def forward(self, x, subjet_masks, subjets_meta, split_mask, particle_masks=None):
         """
@@ -205,7 +237,10 @@ class JetsTransformer(nn.Module):
 
         # pos emb
         if self.options.encoder_pos_emb:
-            pos_emb = self.calc_pos_emb(subjets_meta)
+            if self.use_learnable_space_emb:
+                pos_emb = self.calc_learnable_space_embedding(subjets_meta)
+            else:
+                pos_emb = self.calc_pos_emb(subjets_meta)
             if self.options.debug:
                 print(pos_emb.shape)
             x += pos_emb
@@ -239,13 +274,21 @@ class JetsTransformerPredictor(nn.Module):
         self.predictor_embed = create_predictor_embedding_layers(
             options, input_dim=options.emb_dim
         )
+        self.use_learnable_space_emb = False
         if options.pos_emb_type == "pt":
             self.calc_predictor_pos_emb = create_pt_pos_emb_fn(
                 options.predictor_emb_dim
             )
+        elif options.pos_emb_type == "Learnable_Space":
+            self.use_learnable_space_emb = True
+            emb_dim = options.predictor_emb_dim
+            self.eta_emb_layers = LearnableEmbeddingStacks(input_dim=1, output_dim=emb_dim // 4)
+            self.phi_emb_layers = LearnableEmbeddingStacks(input_dim=1, output_dim=emb_dim // 4)
+            self.eta_phi_low_level_emb_layers = LearnableEmbeddingStacks(input_dim=2, output_dim=emb_dim // 4)
+            self.eta_phi_high_level_emb_layers = LearnableEmbeddingStacks(input_dim=emb_dim // 2, output_dim=emb_dim // 4)
         else:
             self.calc_predictor_pos_emb = create_pos_emb_fn(
-                options, options.predictor_emb_dim
+                options,
             )
 
         options.repr_dim = options.predictor_emb_dim
@@ -273,6 +316,30 @@ class JetsTransformerPredictor(nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
+    def calc_learnable_space_embedding(self, subjet_ftrs):
+        sj_eta = subjet_ftrs[:, :, 1].unsqueeze(-1)
+        sj_phi = subjet_ftrs[:, :, 2].unsqueeze(-1)
+
+        # process phi to impose physical distance
+        sj_phi_star = torch.sin(sj_phi / 2)
+
+        # shift eta to avoid negative positions
+        sj_eta += 3
+
+        # calculate embedding
+        emb_phi = self.phi_emb_layers(sj_phi_star)
+        emb_eta = self.eta_emb_layers(sj_eta)
+        emb_low_level = self.eta_phi_low_level_emb_layers(
+                            torch.cat([sj_phi_star, sj_eta], axis=2)
+                        )
+        emb_high_level = self.eta_phi_high_level_emb_layers(
+                            torch.cat([emb_phi, emb_eta], axis=2)
+                        )
+
+        # print(emb_phi_star.shape)
+        emb = torch.cat([emb_phi, emb_eta, emb_low_level, emb_high_level], axis=2)
+        return emb
+
     def forward(self, x, subjet_masks, target_subjet_ftrs, context_subjet_ftrs):
         """
         Inputs:
@@ -290,15 +357,27 @@ class JetsTransformerPredictor(nn.Module):
         """
         if self.options.debug:
             print(f"JetsTransformerPredictor forward pass with input shape: {x.shape}")
-        # calcualte context positional embedding
+
+
+
         x = self.predictor_embed(x)
-        x += self.calc_predictor_pos_emb(context_subjet_ftrs)
 
         B, N_ctxt, D = x.shape
         _, N_trgt, _ = target_subjet_ftrs.shape
-        # prepare position embeddings for target subjets
-        # (B, N_trgt, N_ftr) -> (B, N_trgt, D)
-        trgt_pos_emb = self.calc_predictor_pos_emb(target_subjet_ftrs)
+
+        if self.use_learnable_space_emb:
+            # calcualte context positional embedding
+            x += self.calc_learnable_space_embedding(context_subjet_ftrs)
+            # prepare position embeddings for target subjets
+            # (B, N_trgt, N_ftr) -> (B, N_trgt, D)
+            trgt_pos_emb = self.calc_learnable_space_embedding(target_subjet_ftrs)
+        else:
+            # calcualte context positional embedding
+            x += self.calc_predictor_pos_emb(context_subjet_ftrs)
+            # prepare position embeddings for target subjets
+            # (B, N_trgt, N_ftr) -> (B, N_trgt, D)
+            trgt_pos_emb = self.calc_predictor_pos_emb(target_subjet_ftrs)
+
         assert trgt_pos_emb.shape[2] == D
         # (B, N_trgt, D) -> (B*N_trgt, 1, D) following FAIR_src
         trgt_pos_emb = trgt_pos_emb.view(B * N_trgt, 1, D)
