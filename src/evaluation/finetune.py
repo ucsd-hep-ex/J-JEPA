@@ -162,7 +162,7 @@ def main(args):
         trial_num = 0
         while True:
             trial_dir = os.path.join(out_dir, f"trial-{trial_num}")
-
+            time.sleep(random.randint(1, 4))
             # Check if directory doesn't exist
             if not os.path.isdir(trial_dir):
                 out_dir = trial_dir
