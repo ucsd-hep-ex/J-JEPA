@@ -179,12 +179,15 @@ def main(args):
     if not args.from_checkpoint:
         print("logfile initialised", file=logfile, flush=True)
         print("output dimension: " + str(args.output_dim), file=logfile, flush=True)
-        if args.flatten:
-            print("aggregation method: flatten", file=logfile, flush=True)
-        elif args.sum:
-            print("aggregation method: sum", file=logfile, flush=True)
+        if not args.cls:
+            if args.flatten:
+                print("aggregation method: flatten", file=logfile, flush=True)
+            elif args.sum:
+                print("aggregation method: sum", file=logfile, flush=True)
+            else:
+                raise ValueError("No aggregation method specified")
         else:
-            raise ValueError("No aggregation method specified")
+            print("classification head", file=logfile, flush=True)
         if args.finetune:
             print("finetuning (jjepa weights not frozen)", file=logfile, flush=True)
         else:
