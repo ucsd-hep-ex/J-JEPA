@@ -59,9 +59,10 @@ def load_data(args, dataset_path, tag=None):
     num_jets = None
     if args.small:
         num_jets = 100 * 1000
-    datset = ParticleDataset(dataset_path, return_labels=True, num_jets=num_jets)
-    dataloader = DataLoader(datset, batch_size=args.batch_size, shuffle=True)
-    return dataloader
+    dataset = ParticleDataset(dataset_path, return_labels=True, num_jets=num_jets)
+    stats = dataset.stats
+    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
+    return dataloader, stats
 
 
 def load_model(logfile, options, model_path=None, device="cpu"):
@@ -207,8 +208,8 @@ def main(args):
     print(f"finetune: {args.finetune}", file=logfile, flush=True)
 
     print("loading data")
-    train_dataloader = load_data(args, args.train_dataset_path, "train")
-    val_dataloader = load_data(args, args.val_dataset_path, "val")
+    train_dataloader, train_stats = load_data(args, args.train_dataset_path, "train")
+    val_dataloader, val_stats = load_data(args, args.val_dataset_path, "val")
     if args.small:
         print("using small dataset for finetuning", file=logfile, flush=True)
         print(
@@ -311,10 +312,7 @@ def main(args):
                 device, non_blocking=True, dtype=torch.float32
             )
             reps = net(
-                p4,
-                p4_spatial,
-                particle_mask,
-                split_mask=None,
+                p4, p4_spatial, particle_mask, split_mask=None, stats=train_stats
             )
             if not args.cls:
                 if args.flatten:
@@ -354,10 +352,7 @@ def main(args):
                     device, non_blocking=True, dtype=torch.float32
                 )
                 reps = net(
-                    p4,
-                    p4_spatial,
-                    particle_mask,
-                    split_mask=None,
+                    p4, p4_spatial, particle_mask, split_mask=None, stats=val_stats
                 )
                 if not args.cls:
                     if args.flatten:
