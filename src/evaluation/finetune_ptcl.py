@@ -149,7 +149,7 @@ def main(args):
         args.output_dim *= 128
     out_dir = args.out_dir
     args.opt = "adam"
-    args.learning_rate = 0.00005 * args.batch_size / 128
+    args.learning_rate = 1e-4 * args.batch_size / 128
 
     # check if experiment already exists and is not empty
     if not args.from_checkpoint:
@@ -569,7 +569,7 @@ if __name__ == "__main__":
         type=int,
         action="store",
         dest="batch_size",
-        default=256,
+        default=128,
         help="batch_size",
     )
     parser.add_argument(
