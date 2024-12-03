@@ -143,6 +143,7 @@ def main(args):
     t0 = time.time()
     # set up results directory
     options = Options.load(args.option_file)
+    args.use_parT = options.use_parT
     args.output_dim = options.emb_dim
 
     if args.flatten and not args.cls:
@@ -171,6 +172,10 @@ def main(args):
     logfile = open(args.logfile, "a")
     if not args.from_checkpoint:
         print("logfile initialised", file=logfile, flush=True)
+        if args.use_parT:
+            print("use particle transformer", file=logfile, flush=True)
+        else:
+            print("use jet transformer", file=logfile, flush=True)
         print("output dimension: " + str(args.output_dim), file=logfile, flush=True)
         if not args.cls:
             if args.flatten:
@@ -213,12 +218,26 @@ def main(args):
     if args.small:
         print("using small dataset for finetuning", file=logfile, flush=True)
         print(
-            f"number of jets: {len(train_dataloader.dataset)}", file=logfile, flush=True
+            f"number of jets for training: {len(train_dataloader.dataset):e}",
+            file=logfile,
+            flush=True,
+        )
+        print(
+            f"number of jets for validation: {len(val_dataloader.dataset):e}",
+            file=logfile,
+            flush=True,
         )
     else:
         print("using full dataset for finetuning", file=logfile, flush=True)
         print(
-            f"number of jets: {len(train_dataloader.dataset)}", file=logfile, flush=True
+            f"number of jets for training: {len(train_dataloader.dataset):e}",
+            file=logfile,
+            flush=True,
+        )
+        print(
+            f"number of jets for validation: {len(val_dataloader.dataset):e}",
+            file=logfile,
+            flush=True,
         )
 
     t1 = time.time()
@@ -311,9 +330,12 @@ def main(args):
             particle_mask = particle_mask.to(
                 device, non_blocking=True, dtype=torch.float32
             )
-            reps = net(
-                p4, p4_spatial, particle_mask, split_mask=None, stats=train_stats
-            )
+            if args.use_parT:
+                reps = net(
+                    p4, p4_spatial, particle_mask, split_mask=None, stats=train_stats
+                )
+            else:
+                reps = net(p4, particle_mask, split_mask=None, stats=train_stats)
             if not args.cls:
                 if args.flatten:
                     reps = reps.view(reps.shape[0], -1)
@@ -351,9 +373,12 @@ def main(args):
                 particle_mask = particle_mask.to(
                     device, non_blocking=True, dtype=torch.float32
                 )
-                reps = net(
-                    p4, p4_spatial, particle_mask, split_mask=None, stats=val_stats
-                )
+                if args.use_parT:
+                    reps = net(
+                        p4, p4_spatial, particle_mask, split_mask=None, stats=val_stats
+                    )
+                else:
+                    reps = net(p4, particle_mask, split_mask=None, stats=val_stats)
                 if not args.cls:
                     if args.flatten:
                         reps = reps.view(reps.shape[0], -1)

@@ -177,7 +177,7 @@ class JetsTransformer(nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
-    def forward(self, x, particle_masks, split_mask, stats=None):
+    def forward(self, x, particle_masks, split_mask=None, stats=None):
         if self.options.debug:
             print(f"JetsTransformer forward pass with input shape: {x.shape}")
 
