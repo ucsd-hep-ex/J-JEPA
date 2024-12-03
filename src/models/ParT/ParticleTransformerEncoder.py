@@ -82,19 +82,19 @@ class ParTEncoder(nn.Module):
             if len(self.options.embed_dims) > 0
             else nn.Identity()
         )
-        # self.pair_embed = (
-        #     PairEmbed(
-        #         self.options.pair_input_dim,
-        #         0,
-        #         self.options.pair_embed_dims + [cfg_block["num_heads"]],
-        #         remove_self_pair=True,
-        #         use_pre_activation_pair=True,
-        #         for_onnx=for_inference,
-        #     )
-        #     if self.options.pair_embed_dims is not None
-        #     and self.options.pair_input_dim > 0
-        #     else None
-        # )
+        self.pair_embed = (
+            PairEmbed(
+                self.options.pair_input_dim,
+                0,
+                self.options.pair_embed_dims + [cfg_block["num_heads"]],
+                remove_self_pair=True,
+                use_pre_activation_pair=True,
+                for_onnx=for_inference,
+            )
+            if self.options.pair_embed_dims is not None
+            and self.options.pair_input_dim > 0
+            else None
+        )
         self.blocks = nn.ModuleList(
             [Block(**cfg_block) for _ in range(self.options.num_layers)]
         )
@@ -158,25 +158,14 @@ class ParTEncoder(nn.Module):
             if self.options.encoder_pos_emb:
                 pos_emb = self.calc_pos_emb(pos_emb_input)  # (N, P, options.emb_dim)
                 x += pos_emb
-            # attn_mask = None
-            # if (v is not None or uu is not None) and self.pair_embed is not None:
-            #     attn_mask = self.pair_embed(v, uu).view(
-            #         -1, v.size(-1), v.size(-1)
-            #     )  # (N*num_heads, P, P)
+            attn_mask = None
+            if (v is not None or uu is not None) and self.pair_embed is not None:
+                attn_mask = self.pair_embed(v, uu).view(
+                    -1, v.size(-1), v.size(-1)
+                )  # (N*num_heads, P, P)
             x = x.transpose(0, 1)  # (P, N, options.emb_dim) for transformer
-            """
-            Args:
-                x (Tensor): input to the layer of shape `(seq_len, batch, embed_dim)`
-                x_cls (Tensor, optional): class token input to the layer of shape `(1, batch, embed_dim)`
-                padding_mask (ByteTensor, optional): binary
-                    ByteTensor of shape `(batch, seq_len)` where padding
-                    elements are indicated by ``1``.
-
-            Returns:
-                encoded output of shape `(seq_len, batch, embed_dim)`
-            """
             for block in self.blocks:
-                x = block(x, x_cls=None, padding_mask=padding_mask, attn_mask=None)
+                x = block(x, x_cls=None, padding_mask=padding_mask, attn_mask=attn_mask)
             x_cls = x
             if self.aggregate_ptcl_features:
                 if self.cls_blocks is not None:
