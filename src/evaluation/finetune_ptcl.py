@@ -187,7 +187,7 @@ def main(args):
             print("lct (jjepa weights frozen)", file=logfile, flush=True)
     else:
         print("loading from checkpoint", file=logfile, flush=True)
-
+    print(f"batch size: {args.batch_size}", file=logfile, flush=True)
     # define the global base device
     world_size = torch.cuda.device_count()
     if world_size:
@@ -569,7 +569,7 @@ if __name__ == "__main__":
         type=int,
         action="store",
         dest="batch_size",
-        default=32,
+        default=256,
         help="batch_size",
     )
     parser.add_argument(
@@ -606,7 +606,7 @@ if __name__ == "__main__":
         type=int,
         action="store",
         dest="small",
-        default=1,
+        default=0,
         help="whether to use a small dataset (10%) for finetuning",
     )
 
