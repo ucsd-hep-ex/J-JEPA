@@ -146,6 +146,19 @@ def main(args):
     args.use_parT = options.use_parT
     args.output_dim = options.emb_dim
 
+    # define the global base device
+    world_size = torch.cuda.device_count()
+    if world_size:
+        device = torch.device("cuda:0")
+        for i in range(world_size):
+            print(
+                f"Device {i}: {torch.cuda.get_device_name(i)}", file=logfile, flush=True
+            )
+    else:
+        device = torch.device("cpu")
+        print("Device: CPU", file=logfile, flush=True)
+    args.device = device
+
     if args.flatten and not args.cls:
         args.output_dim *= 128
     out_dir = args.out_dir
@@ -193,18 +206,6 @@ def main(args):
     else:
         print("loading from checkpoint", file=logfile, flush=True)
     print(f"batch size: {args.batch_size}", file=logfile, flush=True)
-    # define the global base device
-    world_size = torch.cuda.device_count()
-    if world_size:
-        device = torch.device("cuda:0")
-        for i in range(world_size):
-            print(
-                f"Device {i}: {torch.cuda.get_device_name(i)}", file=logfile, flush=True
-            )
-    else:
-        device = torch.device("cpu")
-        print("Device: CPU", file=logfile, flush=True)
-    args.device = device
 
     # print purpose of experiment
     if "from_scratch" in args.label:
