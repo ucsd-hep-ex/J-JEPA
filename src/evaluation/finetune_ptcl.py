@@ -145,6 +145,16 @@ def main(args):
     options = Options.load(args.option_file)
     args.use_parT = options.use_parT
     args.output_dim = options.emb_dim
+    out_dir = args.out_dir
+    args.opt = "adam"
+    args.learning_rate = 1e-4 * args.batch_size / 128
+
+    # check if experiment already exists and is not empty
+    if not args.from_checkpoint:
+        out_dir = get_unique_dir(out_dir)
+    else:
+        # Ensure directory exists for checkpoint loading
+        os.makedirs(out_dir, exist_ok=True)
     # initialise logfile
     args.logfile = f"{out_dir}/logfile.txt"
     logfile = open(args.logfile, "a")
@@ -164,16 +174,6 @@ def main(args):
 
     if args.flatten and not args.cls:
         args.output_dim *= 128
-    out_dir = args.out_dir
-    args.opt = "adam"
-    args.learning_rate = 1e-4 * args.batch_size / 128
-
-    # check if experiment already exists and is not empty
-    if not args.from_checkpoint:
-        out_dir = get_unique_dir(out_dir)
-    else:
-        # Ensure directory exists for checkpoint loading
-        os.makedirs(out_dir, exist_ok=True)
 
     checkpoint = {}
     checkpoint_path = os.path.join(out_dir, "last_checkpoint.pt")
