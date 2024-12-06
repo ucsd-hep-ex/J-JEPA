@@ -145,6 +145,9 @@ def main(args):
     options = Options.load(args.option_file)
     args.use_parT = options.use_parT
     args.output_dim = options.emb_dim
+    # initialise logfile
+    args.logfile = f"{out_dir}/logfile.txt"
+    logfile = open(args.logfile, "a")
 
     # define the global base device
     world_size = torch.cuda.device_count()
@@ -180,9 +183,7 @@ def main(args):
             f"Previous checkpoint found. Restarting from epoch {checkpoint['epoch'] + 1}"
         )
         args.from_checkpoint = 1
-    # initialise logfile
-    args.logfile = f"{out_dir}/logfile.txt"
-    logfile = open(args.logfile, "a")
+
     if not args.from_checkpoint:
         print("logfile initialised", file=logfile, flush=True)
         if args.use_parT:
