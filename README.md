@@ -4,6 +4,8 @@ J-JEPA
 
 Using Joint Embedding Predictive Architecture (JEPA) to do self-supervised learning for jet physics
 
+Our paper on ArXiv: https://arxiv.org/abs/2412.05333 
+
 Project Organization
 ------------
 
