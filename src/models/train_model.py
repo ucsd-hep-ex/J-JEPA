@@ -374,14 +374,14 @@ def main(rank, world_size, args):
             return list(np.load(output_dir))
         return []
     
-    losses_train = load_losses(os.path.join(output_dir, "train_losses.npy"))
-    losses_val = load_losses(os.path.join(output_dir, "val_losses.npy"))
-    mse_losses_train = load_losses(os.path.join(output_dir, "train_mse_losses.npy"))
-    mse_losses_val = load_losses(os.path.join(output_dir, "val_mse_losses.npy"))
-    cov_losses_train = load_losses(os.path.join(output_dir, "train_cov_losses.npy"))
-    cov_losses_val = load_losses(os.path.join(output_dir, "val_cov_losses.npy"))
-    var_losses_train = load_losses(os.path.join(output_dir, "train_var_losses.npy"))
-    var_losses_val = load_losses(os.path.join(output_dir, "val_var_losses.npy"))
+    losses_train = load_losses(os.path.join(out_dir, "train_losses.npy"))
+    losses_val = load_losses(os.path.join(out_dir, "val_losses.npy"))
+    mse_losses_train = load_losses(os.path.join(out_dir, "train_mse_losses.npy"))
+    mse_losses_val = load_losses(os.path.join(out_dir, "val_mse_losses.npy"))
+    cov_losses_train = load_losses(os.path.join(out_dir, "train_cov_losses.npy"))
+    cov_losses_val = load_losses(os.path.join(out_dir, "val_cov_losses.npy"))
+    var_losses_train = load_losses(os.path.join(out_dir, "train_var_losses.npy"))
+    var_losses_val = load_losses(os.path.join(out_dir, "val_var_losses.npy"))
 
     # losses_train = []
     # mse_losses_train = []
