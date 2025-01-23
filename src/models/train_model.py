@@ -369,14 +369,28 @@ def main(rank, world_size, args):
 
     momentum_scheduler = create_momentum_scheduler(options)
 
-    losses_train = []
-    mse_losses_train = []
-    var_losses_train = []
-    cov_losses_train = []
-    losses_val = []
-    mse_losses_val = []
-    var_losses_val = []
-    cov_losses_val = []
+    def load_losses(output_dir):
+        if os.path.isfile(output_dir):
+            return list(np.load(output_dir))
+        return []
+    
+    losses_train = load_losses(os.path.join(out_dir, "train_losses.npy"))
+    losses_val = load_losses(os.path.join(out_dir, "val_losses.npy"))
+    mse_losses_train = load_losses(os.path.join(out_dir, "train_mse_losses.npy"))
+    mse_losses_val = load_losses(os.path.join(out_dir, "val_mse_losses.npy"))
+    cov_losses_train = load_losses(os.path.join(out_dir, "train_cov_losses.npy"))
+    cov_losses_val = load_losses(os.path.join(out_dir, "val_cov_losses.npy"))
+    var_losses_train = load_losses(os.path.join(out_dir, "train_var_losses.npy"))
+    var_losses_val = load_losses(os.path.join(out_dir, "val_var_losses.npy"))
+
+    # losses_train = []
+    # mse_losses_train = []
+    # var_losses_train = []
+    # cov_losses_train = []
+    # losses_val = []
+    # mse_losses_val = []
+    # var_losses_val = []
+    # cov_losses_val = []
 
     lowest_val_loss = np.inf
 
