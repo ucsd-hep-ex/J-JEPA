@@ -13,6 +13,7 @@ from src.util.DimensionCheckLayer import DimensionCheckLayer
 from src.util.create_pos_emb_input import create_pos_emb_input
 
 from src.models.ParT.ParticleTransformerEncoder import ParTEncoder, ParTPredictor
+from src.models.ParT.PairEmbed import PairEmbed
 
 # A dictionary for normalization layers
 NORM_LAYERS = {
@@ -131,10 +132,16 @@ class Block(nn.Module):
         options.hidden_features = mlp_hidden_dim
         self.mlp = MLP(options)
 
-    def forward(self, x, particle_masks):
+    def forward(self, x, padding_mask=None, attn_mask=None):
         if self.options.debug:
             print(f"Block forward pass with input shape: {x.shape}")
-        y = self.attn(self.norm1(x), particle_masks)
+        if attn_mask is not None:
+            expected_shape = (x.size(0) * self.options.num_heads, x.size(1), x.size(1))
+            if attn_mask.shape != expected_shape:
+                raise ValueError(
+                    f"Attention mask shape {attn_mask.shape} does not match expected shape {expected_shape}"
+                )
+        y = self.attn(self.norm1(x), key_padding_mask=padding_mask, attn_mask=attn_mask)
         x = x + self.drop_path(y)
         x = x + self.drop_path(self.mlp(self.norm2(x)))
         if self.options.debug:
@@ -152,6 +159,20 @@ class JetsTransformer(nn.Module):
         self.num_part_ftr = options.num_part_ftr
         self.embed_dim = options.emb_dim
         self.calc_pos_emb = create_pos_emb_fn(options, options.emb_dim)
+
+        self.pair_embed = (
+            PairEmbed(
+                self.options.pair_input_dim,
+                0,
+                self.options.pair_embed_dims + [options.num_heads],
+                remove_self_pair=True,
+                use_pre_activation_pair=True,
+                for_onnx=False,
+            )
+            if self.options.pair_embed_dims is not None
+            and self.options.pair_input_dim > 0
+            else None
+        )
 
         print("num_particles", options.num_particles)
         print("num_part_ftr", options.num_part_ftr)
@@ -177,29 +198,62 @@ class JetsTransformer(nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
-    def forward(self, x, particle_masks, split_mask=None, stats=None):
+    def forward(self, x, v, particle_masks, split_mask=None, stats=None):
+        # x: (B, P, 4) [eta, phi, log_pt, log_energy]
+        # v: (B, P, 4) [px,py,pz,energy]
+        # particle_masks: (B, P) -- real particle = 1, padded = 0
+        # split_mask: (B, P) -- keep in output = 1, ignore in output = 0
         if self.options.debug:
             print(f"JetsTransformer forward pass with input shape: {x.shape}")
 
-        B, N, F = x.shape
+        B, P, F = x.shape
 
-        # Reshape x to (B*N, F) for particle embedding
-        x = x.view(B * N, F)
+        # process the masks
+        particle_masks = particle_masks.bool()
+        particle_masks = (
+            particle_masks.unsqueeze(1) if particle_masks is not None else None
+        )  # (B, 1, P)
+        split_mask = (
+            split_mask.unsqueeze(1) if split_mask is not None else None
+        )  # (B, 1, P)
+
+        padding_mask = ~particle_masks.squeeze(1)  # (B, P)
+        embed_mask = ~particle_masks.transpose(1, 2)  # (B, P, 1)
+
+        attn_mask = None
+
+        # Reshape x to (B*P, F) for particle embedding
+        x = x.view(B * P, F)
 
         # Embed each particle
         x = self.particle_emb(x)
 
-        # Reshape back to (B, N, embed_dim)
-        x = x.view(B, N, -1)
+        # Reshape back to (B, P, embed_dim)
+        x = x.view(B, P, -1)
+
+        # apply the embed mask
+        x = x.masked_fill(embed_mask, 0)  # (B, P, options.emb_dim)
 
         # Add positional embeddings
         pos_emb_input = create_pos_emb_input(x, stats, particle_masks)
         pos_emb = self.calc_pos_emb(pos_emb_input)
         x = x + pos_emb
 
+        if self.pair_embed is not None:
+            if v is None:
+                raise ValueError(
+                    "Four-momentum tensor 'v' is required when using pair embedding"
+                )
+            v = v.transpose(1, 2)  # (B, 4, P)
+            attn_mask = self.pair_embed(v, None).view(
+                -1, v.size(-1), v.size(-1)
+            )  # (B*num_heads, P, P)
+            if self.options.debug:
+                print(f"Pairwise attention mask shape: {attn_mask.shape}")
+
         # Pass through transformer blocks
         for blk in self.blocks:
-            x = blk(x, particle_masks)
+            x = blk(x, padding_mask=padding_mask, attn_mask=attn_mask)
 
         x = self.norm(x)
 
