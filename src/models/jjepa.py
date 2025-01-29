@@ -150,8 +150,8 @@ class JetsTransformer(nn.Module):
             self.calc_pos_emb = create_pos_emb_fn(options, options.emb_dim)
 
         # Adjust the input dimensions based on the new input shape
-        print("num_particles", options.num_particles)
-        print("num_part_ftr", options.num_part_ftr)
+        # print("num_particles", options.num_particles)
+        # print("num_part_ftr", options.num_part_ftr)
         self.subjet_emb = create_embedding_layers(
             options, options.num_particles * options.num_part_ftr
         )
