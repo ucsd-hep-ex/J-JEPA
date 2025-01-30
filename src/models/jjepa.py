@@ -55,7 +55,7 @@ class Attention(nn.Module):
             self.dim, self.num_heads, batch_first=True
         )
 
-    def forward(self, x, particle_masks):
+    def forward(self, x, key_padding_mask=None, attn_mask=None):
         if self.options.debug:
             print(f"Attention forward pass with input shape: {x.shape}")
         B, N, C = x.shape
@@ -74,7 +74,7 @@ class Attention(nn.Module):
         # attn = self.attn_drop(attn)
         # x = (attn @ v).transpose(1, 2).reshape(B, N, C)
 
-        x, _ = self.multihead_attn(q, k, v, key_padding_mask=particle_masks)
+        x, _ = self.multihead_attn(q, k, v, key_padding_mask=key_padding_mask, attn_mask=attn_mask)
 
         x = self.proj(x)
         x = self.activation(x)
@@ -262,12 +262,24 @@ class JetsTransformer(nn.Module):
             if split_mask.dtype != torch.bool:
                 split_mask = split_mask.bool()
 
-            # Apply split mask to select specific particles
-            x = x[split_mask]
+            # Ensure split_mask has the right shape (B, P)
+            if split_mask.dim() == 3:
+                split_mask = split_mask.squeeze(
+                    1
+                )  # Remove middle dimension if (B, 1, P)
+
+            # Create an index tensor for batch dimension
+            batch_size = x.size(0)
+
+            # Get selected indices
+            selected_indices = split_mask.nonzero(as_tuple=True)
+
+            # Select the particles
+            x = x[selected_indices[0], selected_indices[1]]
 
             # Reshape to (B, num_selected, embed_dim)
             num_selected = split_mask.sum(dim=1).min().item()
-            x = x.view(B, num_selected, -1)
+            x = x.view(batch_size, num_selected, -1)
 
         if self.options.debug:
             print(f"JetsTransformer output shape: {x.shape}")
@@ -425,34 +437,34 @@ class JJEPA(nn.Module):
             target["split_mask"].bool() if target["split_mask"] is not None else None
         )
 
-        if self.use_parT:
-            context_repr = self.context_transformer(
-                full_jet["p4"],
-                full_jet["p4_spatial"],
-                full_jet["particle_mask"],
-                context_split_mask,
-                stats=stats,
-            )
-            target_repr = self.target_transformer(
-                full_jet["p4"],
-                full_jet["p4_spatial"],
-                full_jet["particle_mask"],
-                target_split_mask,
-                stats=stats,
-            )
-        else:
-            context_repr = self.context_transformer(
-                full_jet["p4"],
-                full_jet["particle_mask"],
-                context_split_mask,
-                stats=stats,
-            )
-            target_repr = self.target_transformer(
-                full_jet["p4"],
-                full_jet["particle_mask"],
-                target_split_mask,
-                stats=stats,
-            )
+        # if self.use_parT:
+        context_repr = self.context_transformer(
+            full_jet["p4"],
+            full_jet["p4_spatial"],
+            full_jet["particle_mask"],
+            context_split_mask,
+            stats=stats,
+        )
+        target_repr = self.target_transformer(
+            full_jet["p4"],
+            full_jet["p4_spatial"],
+            full_jet["particle_mask"],
+            target_split_mask,
+            stats=stats,
+        )
+        # else:
+        #     context_repr = self.context_transformer(
+        #         full_jet["p4"],
+        #         full_jet["particle_mask"],
+        #         context_split_mask,
+        #         stats=stats,
+        #     )
+        #     target_repr = self.target_transformer(
+        #         full_jet["p4"],
+        #         full_jet["particle_mask"],
+        #         target_split_mask,
+        #         stats=stats,
+        #     )
         if self.options.debug:
             print(f"Context repr shape: {context_repr.shape}")
             print(f"Target repr shape: {target_repr.shape}")
