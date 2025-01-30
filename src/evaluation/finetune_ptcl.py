@@ -67,6 +67,7 @@ def load_data(args, dataset_path, tag=None):
 
 def load_model(logfile, options, model_path=None, device="cpu"):
     model = JJEPA(options).to(device)
+    print(model, file=logfile, flush=True)
     if model_path:
         model.load_state_dict(torch.load(model_path, map_location=device))
         print(f"Loaded model from {model_path}", file=logfile, flush=True)
@@ -594,7 +595,7 @@ if __name__ == "__main__":
         type=int,
         action="store",
         dest="batch_size",
-        default=128,
+        default=1024,
         help="batch_size",
     )
     parser.add_argument(
