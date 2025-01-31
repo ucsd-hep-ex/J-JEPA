@@ -74,7 +74,9 @@ class Attention(nn.Module):
         # attn = self.attn_drop(attn)
         # x = (attn @ v).transpose(1, 2).reshape(B, N, C)
 
-        x, _ = self.multihead_attn(q, k, v, key_padding_mask=key_padding_mask, attn_mask=attn_mask)
+        x, _ = self.multihead_attn(
+            q, k, v, key_padding_mask=key_padding_mask, attn_mask=attn_mask
+        )
 
         x = self.proj(x)
         x = self.activation(x)
@@ -92,11 +94,9 @@ class MLP(nn.Module):
         if self.options.debug:
             print("Initializing MLP module")
         act_layer = ACTIVATION_LAYERS.get(options.activation, nn.GELU)
-        out_features = options.out_features or options.in_features
-        hidden_features = options.hidden_features or options.in_features
-        self.fc1 = nn.Linear(options.in_features, hidden_features)
+        self.fc1 = nn.Linear(options.in_features, options.in_features * 4)
         self.act = act_layer()
-        self.fc2 = nn.Linear(hidden_features, out_features)
+        self.fc2 = nn.Linear(options.in_features * 4, options.in_features)
         self.drop = nn.Dropout(options.drop_mlp)
 
     def forward(self, x):
@@ -149,6 +149,27 @@ class Block(nn.Module):
         return x
 
 
+class Embed(nn.Module):
+    def __init__(self, input_dim, hidden_dim=128, output_dim=1024):
+        super().__init__()
+        self.input_bn = nn.LayerNorm(input_dim)
+        self.embed = nn.Sequential(
+            nn.LayerNorm(input_dim),
+            nn.Linear(input_dim, hidden_dim),
+            nn.GELU(),
+            nn.LayerNorm(hidden_dim),
+            nn.Linear(hidden_dim, hidden_dim * 4),
+            nn.GELU(),
+            nn.LayerNorm(hidden_dim * 4),
+            nn.Linear(hidden_dim * 4, output_dim),
+            nn.GELU(),
+        )
+
+    def forward(self, x):
+        x = self.input_bn(x)
+        return self.embed(x)
+
+
 class JetsTransformer(nn.Module):
     def __init__(self, options: Options):
         super().__init__()
@@ -177,7 +198,9 @@ class JetsTransformer(nn.Module):
         print("num_particles", options.num_particles)
         print("num_part_ftr", options.num_part_ftr)
 
-        self.particle_emb = create_embedding_layers(options, options.num_part_ftr)
+        self.particle_emb = Embed(
+            input_dim=options.num_part_ftr, hidden_dim=128, output_dim=options.emb_dim
+        )
 
         options.repr_dim = options.emb_dim
         options.attn_dim = options.repr_dim
