@@ -96,6 +96,7 @@ class MLP(nn.Module):
         act_layer = ACTIVATION_LAYERS.get(options.activation, nn.GELU)
         self.fc1 = nn.Linear(options.in_features, options.in_features * 4)
         self.act = act_layer()
+        self.norm = nn.LayerNorm(options.in_features * 4)
         self.fc2 = nn.Linear(options.in_features * 4, options.in_features)
         self.drop = nn.Dropout(options.drop_mlp)
 
@@ -105,8 +106,10 @@ class MLP(nn.Module):
         x = self.fc1(x)
         x = self.act(x)
         x = self.drop(x)
+        x = self.norm(x)
         x = self.fc2(x)
         x = self.drop(x)
+        x = self.norm(x)
         if self.options.debug:
             print(f"MLP output shape: {x.shape}")
         return x

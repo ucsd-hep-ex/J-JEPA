@@ -7,7 +7,7 @@
     "checkpoint_freq": 10,
     "debug": false,
     "display_logging": true,
-    "drop_mlp": 0.0,
+    "drop_mlp": 0.1,
     "drop_path": 0.0,
     "dropout": 0.1,
     "ema": [
