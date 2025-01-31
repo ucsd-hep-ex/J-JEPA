@@ -1,7 +1,7 @@
 {
     "activation": "gelu",
     "attn_dim": 768,
-    "attn_drop": 0.0,
+    "attn_drop": 0.1,
     "base_momentum": 0.996,
     "batch_size": 64,
     "checkpoint_freq": 10,
@@ -16,7 +16,7 @@
     ],
     "emb_dim": 1024,
     "embedding_skip_connections": true,
-    "encoder_depth": 4,
+    "encoder_depth": 6,
     "eps": 1e-07,
     "event_info_file": "",
     "hidden_features": 3072,
