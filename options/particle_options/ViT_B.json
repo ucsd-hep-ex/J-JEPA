@@ -14,7 +14,7 @@
         0.996,
         0.999
     ],
-    "emb_dim": 768,
+    "emb_dim": 1024,
     "embedding_skip_connections": true,
     "encoder_depth": 4,
     "eps": 1e-07,
@@ -36,7 +36,7 @@
     "num_context_subjets": 10,
     "num_embedding_layers": 10,
     "num_epochs": 300,
-    "num_heads": 12,
+    "num_heads": 16,
     "num_jets": 1200000,
     "num_part_ftr": 4,
     "num_particles": 30,
