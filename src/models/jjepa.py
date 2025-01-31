@@ -94,22 +94,24 @@ class MLP(nn.Module):
         if self.options.debug:
             print("Initializing MLP module")
         act_layer = ACTIVATION_LAYERS.get(options.activation, nn.GELU)
+        self.pre_fc_norm = nn.LayerNorm(options.in_features)
         self.fc1 = nn.Linear(options.in_features, options.in_features * 4)
         self.act = act_layer()
         self.norm = nn.LayerNorm(options.in_features * 4)
         self.fc2 = nn.Linear(options.in_features * 4, options.in_features)
+        self.post_fc_norm = nn.LayerNorm(options.in_features)
         self.drop = nn.Dropout(options.drop_mlp)
 
     def forward(self, x):
         if self.options.debug:
             print(f"MLP forward pass with input shape: {x.shape}")
-        x = self.norm(x)
+        x = self.pre_fc_norm(x)
         x = self.fc1(x)
         x = self.act(x)
         x = self.drop(x)
         x = self.norm(x)
         x = self.fc2(x)
-        x = self.norm(x)
+        x = self.post_fc_norm(x)
         if self.options.debug:
             print(f"MLP output shape: {x.shape}")
         return x
