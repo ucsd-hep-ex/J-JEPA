@@ -103,12 +103,12 @@ class MLP(nn.Module):
     def forward(self, x):
         if self.options.debug:
             print(f"MLP forward pass with input shape: {x.shape}")
+        x = self.norm(x)
         x = self.fc1(x)
         x = self.act(x)
         x = self.drop(x)
         x = self.norm(x)
         x = self.fc2(x)
-        x = self.drop(x)
         x = self.norm(x)
         if self.options.debug:
             print(f"MLP output shape: {x.shape}")
