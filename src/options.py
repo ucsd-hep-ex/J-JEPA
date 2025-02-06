@@ -286,7 +286,7 @@ class Options(Namespace):
         self.log_freq: int = 1000
 
         # debug mode
-        self.debug: bool = False
+        self.debug: bool = True
 
         # number of val jets
         self.num_val_jets: int = None

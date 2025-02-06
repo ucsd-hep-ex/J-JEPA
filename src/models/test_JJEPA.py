@@ -27,17 +27,20 @@ if __name__ == "__main__":
 
     for i in range(5):
         print(f"Test {i+1}")
-        # Create random data for context and target
-        context_subjets = torch.randn(batch_size, num_ctxt_subjets, num_subjet_features)
+        # random data for context and target
+        # context_subjets = torch.randn(batch_size, num_ctxt_subjets, num_subjet_features)
+        context_subjets = torch.randn(batch_size, num_ctxt_subjets, num_particles * num_features)
         context_particle_mask = torch.randint(0, 2, (batch_size, num_particles)).bool()
         context_subjet_mask = torch.randint(0, 2, (batch_size, num_ctxt_subjets)).bool()
-        context_split_mask = torch.cat(
-            (
-                torch.zeros(batch_size, num_subjets - num_ctxt_subjets),
-                torch.ones(batch_size, num_ctxt_subjets),
-            ),
-            dim=1,
-        ).bool()  # Random boolean mask for example
+        # context_split_mask = torch.cat(
+        #     (
+        #         torch.zeros(batch_size, num_subjets - num_ctxt_subjets),
+        #         torch.ones(batch_size, num_ctxt_subjets),
+        #     ),
+        #     dim=1,
+        # ).bool()  # Random boolean mask for example
+
+        context_split_mask = torch.ones(batch_size, num_ctxt_subjets).bool()
 
         target_subjets = torch.randn(batch_size, num_trgt_subjets, num_subjet_features)
         target_particle_mask = torch.randint(0, 2, (batch_size, num_particles)).bool()
@@ -48,7 +51,7 @@ if __name__ == "__main__":
                 torch.ones(batch_size, num_trgt_subjets),
             ),
             dim=1,
-        ).bool()  # Random boolean mask for example
+        ).bool()  # Shape: [32, 20]
 
         # Create random data for full_jet
         full_jet_particles = torch.randn(
@@ -81,7 +84,7 @@ if __name__ == "__main__":
         }
 
         # Run the model
-        pred_repr, target_repr = jjepa(context, target, full_jet)
+        pred_repr, target_repr, _ = jjepa(context, target, full_jet)
 
         print("Input shapes:")
         print(f"Context subjets: {context_subjets.shape}")

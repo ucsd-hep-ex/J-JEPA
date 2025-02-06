@@ -355,13 +355,13 @@ class JJEPA(nn.Module):
     context = {
         subjets: torch.Tensor,
         particle_mask: torch.Tensor,
-        subjet_mask: torch.Tensor,
+        subjet_mask: None,
         split_mask: torch.Tensor,
     }
     target = {
         subjets: torch.Tensor,
         particle_mask: torch.Tensor,
-        subjet_mask: torch.Tensor,
+        subjet_mask: None,
         split_mask: torch.Tensor,
     }
     full_jet = {
@@ -371,23 +371,55 @@ class JJEPA(nn.Module):
     }
     """
 
+class JJEPA(nn.Module):
+    def __init__(self, options):
+        super(JJEPA, self).__init__()
+        self.options = options
+        if self.options.debug:
+            print("Initializing JJEPA module")
+        self.use_predictor = options.use_predictor
+
+        self.context_transformer = JetsTransformer(options)
+        self.target_transformer = copy.deepcopy(self.context_transformer)
+        self.need_particle_masks = "att" in options.embedding_layers_type.lower()
+        # freeze target transformer
+        for param in self.target_transformer.parameters():
+            param.requires_grad = False
+
+        # Create predictor transformer if desired.
+        if self.use_predictor:
+            self.predictor_transformer = JetsTransformerPredictor(options)
+
+        # Debug layers for dimension checking.
+        if self.options.debug:
+            self.input_check = DimensionCheckLayer("Model Input", 3)
+            self.context_check = DimensionCheckLayer("After Context Transformer", 3)
+            self.predictor_check = DimensionCheckLayer("After Predictor", 3)
+
     def forward(self, context, target, full_jet):
         if self.options.debug:
-            print(f"JJEPA forward pass")
-
+            print("JJEPA forward pass")
+        
+        # instead of passing the full jet (which includes both context and target subjets)
+        # to the context encoder, instaead created an input that contains only the context subjets.
         if self.need_particle_masks:
-            context_repr = self.context_transformer(
-                full_jet,
-                full_jet["subjet_mask"],
-                full_jet["subjets"],
-                context["split_mask"],
-                full_jet["particle_mask"],
-            )
+            if self.options.debug:
+                print("Using particle masks for context and target encoding.")
+                print("Context subjets shape:", context["subjets"].shape)
 
-            # Debug Statement
+            context_input = {"particles": context["subjets"]}
+            if self.options.debug:
+                print("Context transformer input shape:", context_input["particles"].shape)
+            context_repr = self.context_transformer(
+                context_input,
+                context["subjet_mask"],
+                context["subjets"],
+                context["split_mask"],
+                context["particle_mask"],
+            )
             if self.options.debug:
                 context_repr = self.context_check(context_repr)
-
+                print("Context transformer output shape:", context_repr.shape)
             target_repr = self.target_transformer(
                 full_jet,
                 full_jet["subjet_mask"],
@@ -395,26 +427,37 @@ class JJEPA(nn.Module):
                 target["split_mask"],
                 full_jet["particle_mask"],
             )
+            if self.options.debug:
+                print("Target transformer output shape:", target_repr.shape)
         else:
+            if self.options.debug:
+                print("Not using particle masks for encoding.")
+                print("Context subjets shape:", context["subjets"].shape)
+            context_input = {"particles": context["subjets"]}
+            if self.options.debug:
+                print("Context transformer input shape:", context_input["particles"].shape)
             context_repr = self.context_transformer(
-                full_jet,
-                full_jet["subjet_mask"],
-                full_jet["subjets"],
+                context_input,
+                context["subjet_mask"],
+                context["subjets"],
                 context["split_mask"],
             )
-
-            # Debug Statement
             if self.options.debug:
                 context_repr = self.context_check(context_repr)
-
+                print("Context transformer output shape:", context_repr.shape)
             target_repr = self.target_transformer(
                 full_jet,
                 full_jet["subjet_mask"],
                 full_jet["subjets"],
                 target["split_mask"],
             )
+            if self.options.debug:
+                print("Target transformer output shape:", target_repr.shape)
+        
+        # If a predictor is used, pass the context representations along with the target
         if self.use_predictor:
-            # TODO: update the input to the model x, subjet_mask, target_subjet_ftrs, context_subjet_ftrs):
+            if self.options.debug:
+                print("Using predictor transformer.")
             pred_repr = self.predictor_transformer(
                 context_repr,
                 context["subjet_mask"],
@@ -423,14 +466,13 @@ class JJEPA(nn.Module):
             )
             if self.options.debug:
                 pred_repr = self.predictor_check(pred_repr)
-            if self.options.debug:
-                print(
-                    f"JJEPA output - pred_repr shape: {pred_repr.shape}, context_repr shape: {context_repr.shape}"
-                )
+                print("Predictor output shape:", pred_repr.shape)
+                print("JJEPA outputs - pred_repr shape:", pred_repr.shape,
+                      "target_repr shape:", target_repr.shape,
+                      "context_repr shape:", context_repr.shape)
             return pred_repr, target_repr, context_repr
 
         if self.options.debug:
-            print(
-                f"JJEPA output - context_repr shape: {context_repr.shape}, target shape: {target_repr.shape}"
-            )
+            print("JJEPA outputs - context_repr shape:", context_repr.shape,
+                  "target_repr shape:", target_repr.shape)
         return context_repr, target_repr
