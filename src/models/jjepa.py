@@ -372,7 +372,7 @@ class JJEPA(nn.Module):
             target["split_mask"].bool() if target["split_mask"] is not None else None
         )
 
-        if self.use_parT:
+        if self.use_parT_encoder:
             context_repr = self.context_transformer(
                 full_jet["p4"],
                 full_jet["p4_spatial"],

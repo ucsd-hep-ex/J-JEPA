@@ -10,7 +10,8 @@ from src.util.create_pos_emb_input import create_pos_emb_input
 
 from src.models.ParT.PairEmbed import PairEmbed
 from src.util.positional_embedding import create_space_pos_emb_fn
-
+from src.models.ParT.Block import Block as PredictorBlock
+from src.models.ParT.PairEmbed import Embed as PredictorEmbed
 # A dictionary for normalization layers
 NORM_LAYERS = {
     "None": None,
@@ -151,18 +152,20 @@ class Block(nn.Module):
 
 
 class Embed(nn.Module):
-    def __init__(self, input_dim, hidden_dim=128, output_dim=1024):
+    def __init__(self, input_dim, hidden_dim=128, output_dim=1024, device=None, dtype=None):
         super().__init__()
         self.input_bn = nn.LayerNorm(input_dim)
+        self.hidden_dim = hidden_dim
+        
         self.embed = nn.Sequential(
             nn.LayerNorm(input_dim),
-            nn.Linear(input_dim, hidden_dim),
+            nn.Linear(input_dim, self.hidden_dim),
             nn.GELU(),
-            nn.LayerNorm(hidden_dim),
-            nn.Linear(hidden_dim, hidden_dim * 4),
+            nn.LayerNorm(self.hidden_dim),
+            nn.Linear(self.hidden_dim, self.hidden_dim * 4),
             nn.GELU(),
-            nn.LayerNorm(hidden_dim * 4),
-            nn.Linear(hidden_dim * 4, output_dim),
+            nn.LayerNorm(self.hidden_dim * 4),
+            nn.Linear(self.hidden_dim * 4, output_dim,),
             nn.GELU(),
         )
 
@@ -343,10 +346,9 @@ class ParTPredictor(nn.Module):
             options.fc_params[-1][0] if options.fc_params else embed_dim
         )
         self.embed = (
-            Embed(
+            PredictorEmbed(
                 pred_emb_input_dim,
-                self.options.predictor_embed_dims,
-                activation=self.options.activation,
+                self.options.predictor_embed_dims
             )
             if len(self.options.embed_dims) > 0
             else nn.Identity()
@@ -357,7 +359,7 @@ class ParTPredictor(nn.Module):
 
         # Transformer blocks
         self.blocks = nn.ModuleList(
-            [Block(**cfg_block) for _ in range(options.pred_depth)]
+            [PredictorBlock(**cfg_block) for _ in range(options.pred_depth)]
         )
 
         # Normalization and projection layers
