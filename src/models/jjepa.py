@@ -12,8 +12,7 @@ from src.util.tensors import trunc_normal_
 from src.util.DimensionCheckLayer import DimensionCheckLayer
 from src.util.create_pos_emb_input import create_pos_emb_input
 
-from src.models.ParT.ParticleTransformerEncoder import ParTEncoder, ParTPredictor
-from src.models.ParT.PairEmbed import PairEmbed
+from src.models.ParT.ParTEncoder import ParTEncoder, ParTPredictor
 
 # A dictionary for normalization layers
 NORM_LAYERS = {
@@ -55,7 +54,7 @@ class Attention(nn.Module):
             self.dim, self.num_heads, batch_first=True
         )
 
-    def forward(self, x, key_padding_mask=None, attn_mask=None):
+    def forward(self, x, particle_masks):
         if self.options.debug:
             print(f"Attention forward pass with input shape: {x.shape}")
         B, N, C = x.shape
@@ -74,9 +73,7 @@ class Attention(nn.Module):
         # attn = self.attn_drop(attn)
         # x = (attn @ v).transpose(1, 2).reshape(B, N, C)
 
-        x, _ = self.multihead_attn(
-            q, k, v, key_padding_mask=key_padding_mask, attn_mask=attn_mask
-        )
+        x, _ = self.multihead_attn(q, k, v, key_padding_mask=particle_masks)
 
         x = self.proj(x)
         x = self.activation(x)
@@ -94,24 +91,21 @@ class MLP(nn.Module):
         if self.options.debug:
             print("Initializing MLP module")
         act_layer = ACTIVATION_LAYERS.get(options.activation, nn.GELU)
-        self.pre_fc_norm = nn.LayerNorm(options.in_features)
-        self.fc1 = nn.Linear(options.in_features, options.in_features * 4)
+        out_features = options.out_features or options.in_features
+        hidden_features = options.hidden_features or options.in_features
+        self.fc1 = nn.Linear(options.in_features, hidden_features)
         self.act = act_layer()
-        self.norm = nn.LayerNorm(options.in_features * 4)
-        self.fc2 = nn.Linear(options.in_features * 4, options.in_features)
-        self.post_fc_norm = nn.LayerNorm(options.in_features)
+        self.fc2 = nn.Linear(hidden_features, out_features)
         self.drop = nn.Dropout(options.drop_mlp)
 
     def forward(self, x):
         if self.options.debug:
             print(f"MLP forward pass with input shape: {x.shape}")
-        x = self.pre_fc_norm(x)
         x = self.fc1(x)
         x = self.act(x)
         x = self.drop(x)
-        x = self.norm(x)
         x = self.fc2(x)
-        x = self.post_fc_norm(x)
+        x = self.drop(x)
         if self.options.debug:
             print(f"MLP output shape: {x.shape}")
         return x
@@ -137,42 +131,15 @@ class Block(nn.Module):
         options.hidden_features = mlp_hidden_dim
         self.mlp = MLP(options)
 
-    def forward(self, x, padding_mask=None, attn_mask=None):
+    def forward(self, x, particle_masks):
         if self.options.debug:
             print(f"Block forward pass with input shape: {x.shape}")
-        if attn_mask is not None:
-            expected_shape = (x.size(0) * self.options.num_heads, x.size(1), x.size(1))
-            if attn_mask.shape != expected_shape:
-                raise ValueError(
-                    f"Attention mask shape {attn_mask.shape} does not match expected shape {expected_shape}"
-                )
-        y = self.attn(self.norm1(x), key_padding_mask=padding_mask, attn_mask=attn_mask)
+        y = self.attn(self.norm1(x), particle_masks)
         x = x + self.drop_path(y)
         x = x + self.drop_path(self.mlp(self.norm2(x)))
         if self.options.debug:
             print(f"Block output shape: {x.shape}")
         return x
-
-
-class Embed(nn.Module):
-    def __init__(self, input_dim, hidden_dim=128, output_dim=1024):
-        super().__init__()
-        self.input_bn = nn.LayerNorm(input_dim)
-        self.embed = nn.Sequential(
-            nn.LayerNorm(input_dim),
-            nn.Linear(input_dim, hidden_dim),
-            nn.GELU(),
-            nn.LayerNorm(hidden_dim),
-            nn.Linear(hidden_dim, hidden_dim * 4),
-            nn.GELU(),
-            nn.LayerNorm(hidden_dim * 4),
-            nn.Linear(hidden_dim * 4, output_dim),
-            nn.GELU(),
-        )
-
-    def forward(self, x):
-        x = self.input_bn(x)
-        return self.embed(x)
 
 
 class JetsTransformer(nn.Module):
@@ -186,26 +153,10 @@ class JetsTransformer(nn.Module):
         self.embed_dim = options.emb_dim
         self.calc_pos_emb = create_pos_emb_fn(options, options.emb_dim)
 
-        self.pair_embed = (
-            PairEmbed(
-                self.options.pair_input_dim,
-                0,
-                self.options.pair_embed_dims + [options.num_heads],
-                remove_self_pair=True,
-                use_pre_activation_pair=True,
-                for_onnx=False,
-            )
-            if self.options.pair_embed_dims is not None
-            and self.options.pair_input_dim > 0
-            else None
-        )
-
         print("num_particles", options.num_particles)
         print("num_part_ftr", options.num_part_ftr)
 
-        self.particle_emb = Embed(
-            input_dim=options.num_part_ftr, hidden_dim=128, output_dim=options.emb_dim
-        )
+        self.particle_emb = create_embedding_layers(options, options.num_part_ftr)
 
         options.repr_dim = options.emb_dim
         options.attn_dim = options.repr_dim
@@ -226,62 +177,29 @@ class JetsTransformer(nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
-    def forward(self, x, v, particle_masks, split_mask=None, stats=None):
-        # x: (B, P, 4) [eta, phi, log_pt, log_energy]
-        # v: (B, P, 4) [px,py,pz,energy]
-        # particle_masks: (B, P) -- real particle = 1, padded = 0
-        # split_mask: (B, P) -- keep in output = 1, ignore in output = 0
+    def forward(self, x, particle_masks, split_mask=None, stats=None):
         if self.options.debug:
             print(f"JetsTransformer forward pass with input shape: {x.shape}")
 
-        B, P, F = x.shape
+        B, N, F = x.shape
 
-        # process the masks
-        particle_masks = particle_masks.bool()
-        particle_masks = (
-            particle_masks.unsqueeze(1) if particle_masks is not None else None
-        )  # (B, 1, P)
-        split_mask = (
-            split_mask.unsqueeze(1) if split_mask is not None else None
-        )  # (B, 1, P)
-
-        padding_mask = ~particle_masks.squeeze(1)  # (B, P)
-        embed_mask = ~particle_masks.transpose(1, 2)  # (B, P, 1)
-
-        attn_mask = None
-
-        # Reshape x to (B*P, F) for particle embedding
-        x = x.view(B * P, F)
+        # Reshape x to (B*N, F) for particle embedding
+        x = x.view(B * N, F)
 
         # Embed each particle
         x = self.particle_emb(x)
 
-        # Reshape back to (B, P, embed_dim)
-        x = x.view(B, P, -1)
-
-        # apply the embed mask
-        x = x.masked_fill(embed_mask, 0)  # (B, P, options.emb_dim)
+        # Reshape back to (B, N, embed_dim)
+        x = x.view(B, N, -1)
 
         # Add positional embeddings
         pos_emb_input = create_pos_emb_input(x, stats, particle_masks)
         pos_emb = self.calc_pos_emb(pos_emb_input)
         x = x + pos_emb
 
-        if self.pair_embed is not None:
-            if v is None:
-                raise ValueError(
-                    "Four-momentum tensor 'v' is required when using pair embedding"
-                )
-            v = v.transpose(1, 2)  # (B, 4, P)
-            attn_mask = self.pair_embed(v, None).view(
-                -1, v.size(-1), v.size(-1)
-            )  # (B*num_heads, P, P)
-            if self.options.debug:
-                print(f"Pairwise attention mask shape: {attn_mask.shape}")
-
         # Pass through transformer blocks
         for blk in self.blocks:
-            x = blk(x, padding_mask=padding_mask, attn_mask=attn_mask)
+            x = blk(x, particle_masks)
 
         x = self.norm(x)
 
@@ -290,24 +208,12 @@ class JetsTransformer(nn.Module):
             if split_mask.dtype != torch.bool:
                 split_mask = split_mask.bool()
 
-            # Ensure split_mask has the right shape (B, P)
-            if split_mask.dim() == 3:
-                split_mask = split_mask.squeeze(
-                    1
-                )  # Remove middle dimension if (B, 1, P)
-
-            # Create an index tensor for batch dimension
-            batch_size = x.size(0)
-
-            # Get selected indices
-            selected_indices = split_mask.nonzero(as_tuple=True)
-
-            # Select the particles
-            x = x[selected_indices[0], selected_indices[1]]
+            # Apply split mask to select specific particles
+            x = x[split_mask]
 
             # Reshape to (B, num_selected, embed_dim)
             num_selected = split_mask.sum(dim=1).min().item()
-            x = x.view(batch_size, num_selected, -1)
+            x = x.view(B, num_selected, -1)
 
         if self.options.debug:
             print(f"JetsTransformer output shape: {x.shape}")
@@ -426,9 +332,10 @@ class JJEPA(nn.Module):
         if self.options.debug:
             print("Initializing JJEPA module")
         self.use_predictor = options.use_predictor
-        self.use_parT = options.use_parT
+        self.use_parT_encoder = options.use_parT_encoder
+        self.use_parT_predictor = options.use_parT_predictor
 
-        if self.use_parT:
+        if self.use_parT_encoder:
             self.context_transformer = ParTEncoder(options=options)
         else:
             self.context_transformer = JetsTransformer(options)
@@ -438,7 +345,7 @@ class JJEPA(nn.Module):
             param.requires_grad = False
 
         if self.use_predictor:
-            if self.use_parT:
+            if self.use_parT_predictor:
                 self.predictor_transformer = ParTPredictor(options=options)
             else:
                 self.predictor_transformer = JetsTransformerPredictor(options)
@@ -465,42 +372,39 @@ class JJEPA(nn.Module):
             target["split_mask"].bool() if target["split_mask"] is not None else None
         )
 
-        # if self.use_parT:
-        context_repr = self.context_transformer(
-            full_jet["p4"],
-            full_jet["p4_spatial"],
-            full_jet["particle_mask"],
-            context_split_mask,
-            stats=stats,
-        )
-        target_repr = self.target_transformer(
-            full_jet["p4"],
-            full_jet["p4_spatial"],
-            full_jet["particle_mask"],
-            target_split_mask,
-            stats=stats,
-        )
-        # else:
-        #     context_repr = self.context_transformer(
-        #         full_jet["p4"],
-        #         full_jet["particle_mask"],
-        #         context_split_mask,
-        #         stats=stats,
-        #     )
-        #     target_repr = self.target_transformer(
-        #         full_jet["p4"],
-        #         full_jet["particle_mask"],
-        #         target_split_mask,
-        #         stats=stats,
-        #     )
+        if self.use_parT:
+            context_repr = self.context_transformer(
+                full_jet["p4"],
+                full_jet["p4_spatial"],
+                full_jet["particle_mask"],
+                context_split_mask,
+                stats=stats,
+            )
+            target_repr = self.target_transformer(
+                full_jet["p4"],
+                full_jet["p4_spatial"],
+                full_jet["particle_mask"],
+                target_split_mask,
+                stats=stats,
+            )
+        else:
+            context_repr = self.context_transformer(
+                full_jet["p4"],
+                full_jet["particle_mask"],
+                context_split_mask,
+                stats=stats,
+            )
+            target_repr = self.target_transformer(
+                full_jet["p4"],
+                full_jet["particle_mask"],
+                target_split_mask,
+                stats=stats,
+            )
         if self.options.debug:
             print(f"Context repr shape: {context_repr.shape}")
             print(f"Target repr shape: {target_repr.shape}")
 
         if self.use_predictor:
-            # pred_repr = self.predictor_transformer(
-            #     context_repr, context["particle_mask"], target["particle_mask"]
-            # )
             pred_repr = self.predictor_transformer(
                 context_repr,
                 context["particle_mask"],

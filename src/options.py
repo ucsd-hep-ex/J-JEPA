@@ -28,14 +28,16 @@ class Options(Namespace):
         # number of particle features per particle
         self.num_part_ftr: int = 4
         self.num_particles: int = 30
-        
 
         # =========================================================================================
         # Network Architecture
         # =========================================================================================
 
         # Whether to use the particle transformer encoder
-        self.use_parT: bool = True
+        self.use_parT_encoder: bool = True
+
+        # Whether to use the particle transformer predictor
+        self.use_parT_predictor: bool = True
 
         # Use predictor
         self.use_predictor: bool = True
