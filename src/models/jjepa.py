@@ -12,7 +12,7 @@ from src.util.tensors import trunc_normal_
 from src.util.DimensionCheckLayer import DimensionCheckLayer
 from src.util.create_pos_emb_input import create_pos_emb_input
 
-from src.models.ParT.ParticleTransformerEncoder import ParTEncoder, ParTPredictor
+from src.models.ParT.ParTEncoder import ParTEncoder, ParTPredictor
 
 # A dictionary for normalization layers
 NORM_LAYERS = {
@@ -332,9 +332,10 @@ class JJEPA(nn.Module):
         if self.options.debug:
             print("Initializing JJEPA module")
         self.use_predictor = options.use_predictor
-        self.use_parT = options.use_parT
+        self.use_parT_encoder = options.use_parT_encoder
+        self.use_parT_predictor = options.use_parT_predictor
 
-        if self.use_parT:
+        if self.use_parT_encoder:
             self.context_transformer = ParTEncoder(options=options)
         else:
             self.context_transformer = JetsTransformer(options)
@@ -344,7 +345,7 @@ class JJEPA(nn.Module):
             param.requires_grad = False
 
         if self.use_predictor:
-            if self.use_parT:
+            if self.use_parT_predictor:
                 self.predictor_transformer = ParTPredictor(options=options)
             else:
                 self.predictor_transformer = JetsTransformerPredictor(options)
@@ -371,7 +372,7 @@ class JJEPA(nn.Module):
             target["split_mask"].bool() if target["split_mask"] is not None else None
         )
 
-        if self.use_parT:
+        if self.use_parT_encoder:
             context_repr = self.context_transformer(
                 full_jet["p4"],
                 full_jet["p4_spatial"],
@@ -404,9 +405,6 @@ class JJEPA(nn.Module):
             print(f"Target repr shape: {target_repr.shape}")
 
         if self.use_predictor:
-            # pred_repr = self.predictor_transformer(
-            #     context_repr, context["particle_mask"], target["particle_mask"]
-            # )
             pred_repr = self.predictor_transformer(
                 context_repr,
                 context["particle_mask"],

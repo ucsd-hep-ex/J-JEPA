@@ -67,6 +67,7 @@ def load_data(args, dataset_path, tag=None):
 
 def load_model(logfile, options, model_path=None, device="cpu"):
     model = JJEPA(options).to(device)
+    print(model, file=logfile, flush=True)
     if model_path:
         model.load_state_dict(torch.load(model_path, map_location=device))
         print(f"Loaded model from {model_path}", file=logfile, flush=True)
@@ -332,12 +333,12 @@ def main(args):
             particle_mask = particle_mask.to(
                 device, non_blocking=True, dtype=torch.float32
             )
-            if args.use_parT:
-                reps = net(
-                    p4, p4_spatial, particle_mask, split_mask=None, stats=train_stats
-                )
-            else:
-                reps = net(p4, particle_mask, split_mask=None, stats=train_stats)
+            # if args.use_parT:
+            reps = net(
+                p4, p4_spatial, particle_mask, split_mask=None, stats=train_stats
+            )
+            # else:
+            #     reps = net(p4, particle_mask, split_mask=None, stats=train_stats)
             if not args.cls:
                 if args.flatten:
                     reps = reps.view(reps.shape[0], -1)
@@ -375,12 +376,12 @@ def main(args):
                 particle_mask = particle_mask.to(
                     device, non_blocking=True, dtype=torch.float32
                 )
-                if args.use_parT:
-                    reps = net(
-                        p4, p4_spatial, particle_mask, split_mask=None, stats=val_stats
-                    )
-                else:
-                    reps = net(p4, particle_mask, split_mask=None, stats=val_stats)
+                # if args.use_parT:
+                reps = net(
+                    p4, p4_spatial, particle_mask, split_mask=None, stats=val_stats
+                )
+                # else:
+                #     reps = net(p4, particle_mask, split_mask=None, stats=val_stats)
                 if not args.cls:
                     if args.flatten:
                         reps = reps.view(reps.shape[0], -1)
@@ -596,7 +597,7 @@ if __name__ == "__main__":
         type=int,
         action="store",
         dest="batch_size",
-        default=128,
+        default=256,
         help="batch_size",
     )
     parser.add_argument(

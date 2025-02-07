@@ -12,6 +12,9 @@ def create_pos_emb_input(x, stats, mask):
         pos_emb_input: input tensor for the positional embedding layer
                      last dimension: [pt, eta, phi, E]
     """
+    # Ensure mask has correct shape
+    if mask.dim() == 3:
+        mask = mask.squeeze(1)  # Convert from (B, 1, N) to (B, N)
     pos_emb_input = torch.empty_like(x)
     pos_emb_input[:, :, 0] = (
         torch.exp(x[:, :, 2] * stats["part_pt_log"][1] + stats["part_pt_log"][0])

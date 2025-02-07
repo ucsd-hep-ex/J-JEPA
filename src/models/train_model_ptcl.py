@@ -245,10 +245,14 @@ def main(rank, world_size, args):
 
     setup_logging(rank, args.output_dir)
     logger.info(f"Initialized (rank/world-size) {rank}/{world_size}")
-    if options.use_parT:
-        logger.info("Using ParticleTransformer")
+    if options.use_parT_encoder:
+        logger.info("Using ParT Encoder")
     else:
-        logger.info("Using JetTransformer")
+        logger.info("Using JetTransformer Encoder")
+    if options.use_parT_predictor:
+        logger.info("Using ParT Predictor")
+    else:
+        logger.info("Using JetTransformer Predictor")
     logger.info(f"covariance loss weight: {options.cov_loss_weight}")
     logger.info(f"variance loss weight: {options.var_loss_weight}")
     logger.info(f"base momentum: {options.base_momentum}")
