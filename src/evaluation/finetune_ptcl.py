@@ -144,7 +144,7 @@ def main(args):
     t0 = time.time()
     # set up results directory
     options = Options.load(args.option_file)
-    args.use_parT = options.use_parT
+    args.use_parT = options.use_parT_encoder
     args.output_dim = options.emb_dim
     out_dir = args.out_dir
     args.opt = "adam"
@@ -333,12 +333,12 @@ def main(args):
             particle_mask = particle_mask.to(
                 device, non_blocking=True, dtype=torch.float32
             )
-            # if args.use_parT:
-            reps = net(
-                p4, p4_spatial, particle_mask, split_mask=None, stats=train_stats
-            )
-            # else:
-            #     reps = net(p4, particle_mask, split_mask=None, stats=train_stats)
+            if args.use_parT:
+                reps = net(
+                    p4, p4_spatial, particle_mask, split_mask=None, stats=train_stats
+                )
+            else:
+                reps = net(p4, particle_mask, split_mask=None, stats=train_stats)
             if not args.cls:
                 if args.flatten:
                     reps = reps.view(reps.shape[0], -1)
@@ -376,12 +376,12 @@ def main(args):
                 particle_mask = particle_mask.to(
                     device, non_blocking=True, dtype=torch.float32
                 )
-                # if args.use_parT:
-                reps = net(
-                    p4, p4_spatial, particle_mask, split_mask=None, stats=val_stats
-                )
-                # else:
-                #     reps = net(p4, particle_mask, split_mask=None, stats=val_stats)
+                if args.use_parT:
+                    reps = net(
+                        p4, p4_spatial, particle_mask, split_mask=None, stats=val_stats
+                    )
+                else:
+                    reps = net(p4, particle_mask, split_mask=None, stats=val_stats)
                 if not args.cls:
                     if args.flatten:
                         reps = reps.view(reps.shape[0], -1)
