@@ -329,28 +329,6 @@ class JetsTransformerPredictor(nn.Module):
             print(f"JetsTransformerPredictor output shape: {x.shape}")
         return x.view(B, N_trgt, -1)
 
-
-class JJEPA(nn.Module):
-    def __init__(self, options: Options):
-        super(JJEPA, self).__init__()
-        self.options = options
-        if self.options.debug:
-            print("Initializing JJEPA module")
-        self.use_predictor = options.use_predictor
-        self.context_transformer = JetsTransformer(options)
-        self.target_transformer = copy.deepcopy(self.context_transformer)
-        self.need_particle_masks = "att" in options.embedding_layers_type.lower()
-        for param in self.target_transformer.parameters():
-            param.requires_grad = False
-        if self.use_predictor:
-            self.predictor_transformer = JetsTransformerPredictor(options)
-
-        # Debug Statement
-        if self.options.debug:
-            self.input_check = DimensionCheckLayer("Model Input", 3)
-            self.context_check = DimensionCheckLayer("After Context Transformer", 3)
-            self.predictor_check = DimensionCheckLayer("After Predictor", 3)
-
     """
     context = {
         subjets: torch.Tensor,
@@ -370,6 +348,7 @@ class JJEPA(nn.Module):
         subjet_mask: torch.Tensor,
     }
     """
+
 
 class JJEPA(nn.Module):
     def __init__(self, options):
@@ -399,7 +378,7 @@ class JJEPA(nn.Module):
     def forward(self, context, target, full_jet):
         if self.options.debug:
             print("JJEPA forward pass")
-        
+
         # instead of passing the full jet (which includes both context and target subjets)
         # to the context encoder, instaead created an input that contains only the context subjets.
         if self.need_particle_masks:
@@ -409,7 +388,9 @@ class JJEPA(nn.Module):
 
             context_input = {"particles": context["subjets"]}
             if self.options.debug:
-                print("Context transformer input shape:", context_input["particles"].shape)
+                print(
+                    "Context transformer input shape:", context_input["particles"].shape
+                )
             context_repr = self.context_transformer(
                 context_input,
                 context["subjet_mask"],
@@ -435,7 +416,10 @@ class JJEPA(nn.Module):
                 print("Context subjets shape:", context["subjets"].shape)
             context_input = {"particles": context["subjets"]}
             if self.options.debug:
-                print("Context transformer input shape:", context_input["particles"].shape)
+                print(
+                    "Context transformer input shape:", context_input["particles"].shape
+                )
+                # forward(self, x, subjet_masks, subjets_meta, split_mask, particle_masks=None):
             context_repr = self.context_transformer(
                 context_input,
                 context["subjet_mask"],
@@ -453,7 +437,7 @@ class JJEPA(nn.Module):
             )
             if self.options.debug:
                 print("Target transformer output shape:", target_repr.shape)
-        
+
         # If a predictor is used, pass the context representations along with the target
         if self.use_predictor:
             if self.options.debug:
@@ -467,12 +451,21 @@ class JJEPA(nn.Module):
             if self.options.debug:
                 pred_repr = self.predictor_check(pred_repr)
                 print("Predictor output shape:", pred_repr.shape)
-                print("JJEPA outputs - pred_repr shape:", pred_repr.shape,
-                      "target_repr shape:", target_repr.shape,
-                      "context_repr shape:", context_repr.shape)
+                print(
+                    "JJEPA outputs - pred_repr shape:",
+                    pred_repr.shape,
+                    "target_repr shape:",
+                    target_repr.shape,
+                    "context_repr shape:",
+                    context_repr.shape,
+                )
             return pred_repr, target_repr, context_repr
 
         if self.options.debug:
-            print("JJEPA outputs - context_repr shape:", context_repr.shape,
-                  "target_repr shape:", target_repr.shape)
+            print(
+                "JJEPA outputs - context_repr shape:",
+                context_repr.shape,
+                "target_repr shape:",
+                target_repr.shape,
+            )
         return context_repr, target_repr

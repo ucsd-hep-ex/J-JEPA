@@ -76,6 +76,12 @@ def parse_args():
         default="space",
         help="Type of positional embedding to use, choose between pt and space",
     )
+    parser.add_argument(
+        "--debug",
+        type=int,
+        default=0,
+        help="debug mode",
+    )
     return parser.parse_args()
 
 
@@ -269,6 +275,7 @@ def main(rank, world_size, args):
     options.cov_loss_weight = args.cov_loss_weight
     options.var_loss_weight = args.var_loss_weight
     options.encoder_pos_emb = args.encoder_pos_emb
+    options.debug = args.debug
 
     setup_logging(rank, args.output_dir)
     logger.info(f"Initialized (rank/world-size) {rank}/{world_size}")
@@ -373,7 +380,7 @@ def main(rank, world_size, args):
         if os.path.isfile(output_dir):
             return list(np.load(output_dir))
         return []
-    
+
     losses_train = load_losses(os.path.join(out_dir, "train_losses.npy"))
     losses_val = load_losses(os.path.join(out_dir, "val_losses.npy"))
     mse_losses_train = load_losses(os.path.join(out_dir, "train_mse_losses.npy"))
