@@ -386,6 +386,11 @@ class JJEPA(nn.Module):
         context_mask = context["split_mask"].unsqueeze(-1).expand(-1, -1, D)
         context_particles = full_jet["particles"][context_mask].view(B, -1, D)
         context_input = {"particles": context_particles}
+
+        # Similarly extract the corresponding particle masks
+        context_particle_mask = full_jet["particle_mask"][context["split_mask"]].view(
+            B, -1
+        )
         if self.options.debug:
             print("Context particles shape:", context_particles.shape)
 
@@ -399,7 +404,7 @@ class JJEPA(nn.Module):
                 context["subjet_mask"],
                 context["subjets"],
                 split_mask=None,
-                particle_masks=context["particle_mask"],
+                particle_masks=context_particle_mask,
             )
             if self.options.debug:
                 context_repr = self.context_check(context_repr)
