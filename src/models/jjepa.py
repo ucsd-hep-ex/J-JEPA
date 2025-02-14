@@ -379,18 +379,24 @@ class JJEPA(nn.Module):
         if self.options.debug:
             print("JJEPA forward pass")
 
-        # instead of passing the full jet (which includes both context and target subjets)
-        # to the context encoder, instaead created an input that contains only the context subjets.
+        # Instead of directly using context["subjets"], we need to extract the relevant particles
+        # from full_jet["particles"] using context["split_mask"]
         if self.need_particle_masks:
             if self.options.debug:
                 print("Using particle masks for context and target encoding.")
                 print("Context subjets shape:", context["subjets"].shape)
 
-            context_input = {"particles": context["subjets"]}
+            # Get the particles corresponding to context subjets using split mask
+            B, N, D = full_jet["particles"].shape
+            context_mask = context["split_mask"].unsqueeze(-1).expand(-1, -1, D)
+            context_particles = full_jet["particles"][context_mask].view(B, -1, D)
+            context_input = {"particles": context_particles}
+
             if self.options.debug:
                 print(
                     "Context transformer input shape:", context_input["particles"].shape
                 )
+
             context_repr = self.context_transformer(
                 context_input,
                 context["subjet_mask"],
