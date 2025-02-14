@@ -175,7 +175,9 @@ class JetsTransformer(nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
-    def forward(self, x, subjet_masks, subjets_meta, split_mask, particle_masks=None):
+    def forward(
+        self, x, subjet_masks, subjets_meta, split_mask=None, particle_masks=None
+    ):
         """
         Inputs:
             x: particles of subjets
@@ -183,7 +185,7 @@ class JetsTransformer(nn.Module):
             subjet_meta: 4 vec of subjets
                 shape: [B, N_sj, N_sj_ftr=5]
                 N_sj_ftr: pt, eta, phi, E, num_part
-            split_mask: mask out certain subjet representations, depending on context/target
+            split_mask: mask out certain subjet representations, None for context
                 shape: [B, N_sj_to_keep]
         Return:
             subjet representations
@@ -379,30 +381,25 @@ class JJEPA(nn.Module):
         if self.options.debug:
             print("JJEPA forward pass")
 
-        # Instead of directly using context["subjets"], we need to extract the relevant particles
-        # from full_jet["particles"] using context["split_mask"]
+        # Get the particles corresponding to context subjets using split mask
+        B, N, D = full_jet["particles"].shape
+        context_mask = context["split_mask"].unsqueeze(-1).expand(-1, -1, D)
+        context_particles = full_jet["particles"][context_mask].view(B, -1, D)
+        context_input = {"particles": context_particles}
+        if self.options.debug:
+            print("Context particles shape:", context_particles.shape)
+
         if self.need_particle_masks:
             if self.options.debug:
                 print("Using particle masks for context and target encoding.")
                 print("Context subjets shape:", context["subjets"].shape)
 
-            # Get the particles corresponding to context subjets using split mask
-            B, N, D = full_jet["particles"].shape
-            context_mask = context["split_mask"].unsqueeze(-1).expand(-1, -1, D)
-            context_particles = full_jet["particles"][context_mask].view(B, -1, D)
-            context_input = {"particles": context_particles}
-
-            if self.options.debug:
-                print(
-                    "Context transformer input shape:", context_input["particles"].shape
-                )
-
             context_repr = self.context_transformer(
                 context_input,
                 context["subjet_mask"],
                 context["subjets"],
-                context["split_mask"],
-                context["particle_mask"],
+                split_mask=None,
+                particle_masks=context["particle_mask"],
             )
             if self.options.debug:
                 context_repr = self.context_check(context_repr)
@@ -411,8 +408,8 @@ class JJEPA(nn.Module):
                 full_jet,
                 full_jet["subjet_mask"],
                 full_jet["subjets"],
-                target["split_mask"],
-                full_jet["particle_mask"],
+                split_mask=target["split_mask"],
+                particle_masks=full_jet["particle_mask"],
             )
             if self.options.debug:
                 print("Target transformer output shape:", target_repr.shape)
@@ -420,17 +417,8 @@ class JJEPA(nn.Module):
             if self.options.debug:
                 print("Not using particle masks for encoding.")
                 print("Context subjets shape:", context["subjets"].shape)
-            context_input = {"particles": context["subjets"]}
-            if self.options.debug:
-                print(
-                    "Context transformer input shape:", context_input["particles"].shape
-                )
-                # forward(self, x, subjet_masks, subjets_meta, split_mask, particle_masks=None):
             context_repr = self.context_transformer(
-                context_input,
-                context["subjet_mask"],
-                context["subjets"],
-                context["split_mask"],
+                context_input, context["subjet_mask"], context["subjets"]
             )
             if self.options.debug:
                 context_repr = self.context_check(context_repr)
@@ -439,7 +427,7 @@ class JJEPA(nn.Module):
                 full_jet,
                 full_jet["subjet_mask"],
                 full_jet["subjets"],
-                target["split_mask"],
+                split_mask=target["split_mask"],
             )
             if self.options.debug:
                 print("Target transformer output shape:", target_repr.shape)
