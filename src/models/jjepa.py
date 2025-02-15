@@ -387,12 +387,16 @@ class JJEPA(nn.Module):
         context_particles = full_jet["particles"][context_mask].view(B, -1, D)
         context_input = {"particles": context_particles}
 
-        # Similarly extract the corresponding particle masks
+        # Extract and reshape the particle masks to match expected dimensions
+        # The embedding stack expects masks of shape [B, N_sj, N_particles]
+        num_context_subjets = context["split_mask"].sum(dim=1).max().item()
         context_particle_mask = full_jet["particle_mask"][context["split_mask"]].view(
-            B, -1
+            B, num_context_subjets, -1
         )
+
         if self.options.debug:
             print("Context particles shape:", context_particles.shape)
+            print("Context particle mask shape:", context_particle_mask.shape)
 
         if self.need_particle_masks:
             if self.options.debug:
