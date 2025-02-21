@@ -277,6 +277,10 @@ def main(rank, world_size, args):
     options.encoder_pos_emb = args.encoder_pos_emb
     options.debug = args.debug
 
+    # save the options to the output directory
+    with open(os.path.join(out_dir, "options.json"), "w") as f:
+        json.dump(options.__dict__, f)
+
     setup_logging(rank, args.output_dir)
     logger.info(f"Initialized (rank/world-size) {rank}/{world_size}")
     logger.info(f"covariance loss weight: {options.cov_loss_weight}")
