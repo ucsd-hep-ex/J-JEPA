@@ -75,19 +75,19 @@ def build_features_and_labels(tree, transform_features=True):
 
     # Apply standardization if requested
     if transform_features:
-        # Calculate statistics before transformation
-        mean_log_e = np.mean(ak.flatten(a["part_e_log"]))
-        std_log_e = np.std(ak.flatten(a["part_e_log"]))
-
-        # Store statistics
-        stats["part_e_log"] = np.array([mean_log_e, std_log_e])
-
         # Apply normalization
-        a["part_pt_log"] = (a["part_pt_log"] - 1.7) / 0.7
-        a["part_e_log"] = (a["part_e_log"] - mean_log_e) / std_log_e
-        a["part_logptrel"] = (a["part_logptrel"] - (-4.7)) / 0.7
-        a["part_logerel"] = (a["part_logerel"] - (-4.7)) / 0.7
-        a["part_deltaR"] = (a["part_deltaR"] - 0.2) / 4.0
+        a["part_pt_log"] = (a["part_pt_log"] - 1.7) * 0.7
+        a["part_e_log"] = (a["part_e_log"] - 2.0) * 0.7
+        a["part_logptrel"] = (a["part_logptrel"] - (-4.7)) * 0.7
+        a["part_logerel"] = (a["part_logerel"] - (-4.7)) * 0.7
+        a["part_deltaR"] = (a["part_deltaR"] - 0.2) * 4.0
+
+        # add statistics
+        stats["part_pt_log"] = np.array([1.7, 1 / 0.7])
+        stats["part_e_log"] = np.array([2.0, 1 / 0.7])
+        stats["part_logptrel"] = np.array([-4.7, 1 / 0.7])
+        stats["part_logerel"] = np.array([-4.7, 1 / 0.7])
+        stats["part_deltaR"] = np.array([0.2, 1 / 4.0])
 
         # Clip impact parameter errors as in JetClass101
         a["part_d0err"] = _clip(a["part_d0err"], 0, 1)
