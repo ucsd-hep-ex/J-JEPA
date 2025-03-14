@@ -258,7 +258,6 @@ if __name__ == "__main__":
     parser.add_argument(
         "--global_stats",
         action="store_true",
-        default=True,
         help="Calculate global statistics across all files for consistent normalization",
     )
     args = parser.parse_args()
