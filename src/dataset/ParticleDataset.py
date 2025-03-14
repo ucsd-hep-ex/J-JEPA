@@ -19,7 +19,7 @@ class ParticleDataset(Dataset):
         particles_dict = {}  # Will hold lists of particle data arrays
         labels_list = []
         mask_list = []
-        stats_dict = {}  # Will hold lists of stats data arrays
+        self.stats = {}  # Will store the first occurrence of each stat
 
         # Loop through files in the directory
         for filename in os.listdir(directory_path):
@@ -43,10 +43,10 @@ class ParticleDataset(Dataset):
                 labels_list.append(labels)
                 mask_list.append(mask)
 
+                # For stats, only store the first occurrence of each
                 for key in stats:
-                    if key not in stats_dict:
-                        stats_dict[key] = []
-                    stats_dict[key].append(stats[key])
+                    if key not in self.stats:  # Only add if not already present
+                        self.stats[key] = stats[key]
 
                 print(f"Loaded {directory_path}/{filename}")
 
@@ -56,9 +56,6 @@ class ParticleDataset(Dataset):
         }
         self.labels = np.concatenate(labels_list, axis=0)
         self.mask = np.concatenate(mask_list, axis=0)
-        self.stats = {
-            key: np.concatenate(stats_dict[key], axis=0) for key in stats_dict
-        }
 
         part_features = (
             particles_dict.keys()
@@ -89,9 +86,9 @@ class ParticleDataset(Dataset):
                 self.stats[key] = self.stats[key][:num_jets]
         # print(f"p4_spatial shape: {self.p4_spatial.shape}")
         # print(f"mask shape: {self.mask.shape}")
-        self.p4_spatial = self.p4_spatial.transpose(0, 2, 1) # (num_jets, num_ptcls, 4)
-        self.p4 = self.p4.transpose(0, 2, 1) # (num_jets, num_ptcls, 4)
-        
+        self.p4_spatial = self.p4_spatial.transpose(0, 2, 1)  # (num_jets, num_ptcls, 4)
+        self.p4 = self.p4.transpose(0, 2, 1)  # (num_jets, num_ptcls, 4)
+
         if self.return_labels:
             print(
                 "__getitem__ returns",
