@@ -70,10 +70,6 @@ def build_features_and_labels(tree, transform_features=True):
     a["part_d0"] = np.tanh(a["part_d0val"])
     a["part_dz"] = np.tanh(a["part_dzval"])
 
-    # Compute or ensure required features are present
-    a["part_deta"] = a.get("part_deta", a["part_eta"])  # Use if exists or calculate
-    a["part_dphi"] = a.get("part_dphi", a["part_phi"])  # Use if exists or calculate
-
     # Stats collection for normalization
     stats = {}
 
