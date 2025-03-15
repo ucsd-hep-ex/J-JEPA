@@ -88,6 +88,8 @@ def build_features_and_labels(tree, transform_features=True):
         stats["part_logptrel"] = np.array([-4.7, 1 / 0.7])
         stats["part_logerel"] = np.array([-4.7, 1 / 0.7])
         stats["part_deltaR"] = np.array([0.2, 1 / 4.0])
+        stats["part_deta"] = np.array([0, 1])
+        stats["part_dphi"] = np.array([0, 1])
 
         # Clip impact parameter errors as in JetClass101
         a["part_d0err"] = _clip(a["part_d0err"], 0, 1)
