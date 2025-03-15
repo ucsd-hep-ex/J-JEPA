@@ -100,7 +100,6 @@ def save_h5_in_chunks(
         with h5py.File(f"{save_dir}/data_{i}.h5", "w") as hdf:
             # Create groups
             particles_group = hdf.create_group("particles")
-            stats_group = hdf.create_group("stats")
 
             # Save particle features for this chunk
             for name in part_batch.keys():
@@ -112,9 +111,11 @@ def save_h5_in_chunks(
             hdf.create_dataset("labels", data=labels_batch[start_index:end_index])
             hdf.create_dataset("mask", data=mask_batch[start_index:end_index])
 
-            # Save stats (only for the first file if stats should be in one file)
-            for name in stats.keys():
-                stats_group.create_dataset(name, data=stats[name])
+            # Save stats in every file if they exist
+            if stats:
+                stats_group = hdf.create_group("stats")
+                for name in stats.keys():
+                    stats_group.create_dataset(name, data=stats[name])
 
         print(f"Saved chunk {i+1}/{num_files} with {current_samples} samples")
 
@@ -307,7 +308,6 @@ def main(args):
 
             file_counter = 0
             current_index = 0
-            stats_saved = False  # Flag to track if we've saved stats yet
 
             for i, file in enumerate(data_files):
                 with h5py.File(file, "r") as hdf:
@@ -340,14 +340,9 @@ def main(args):
                     ) as hdf:
                         # Create groups
                         particles_group = hdf.create_group("particles")
-
-                        # Only create stats group and save stats for the first file
-                        if not stats_saved:
-                            stats_group = hdf.create_group("stats")
-                            # Save all stats
-                            for name in stats:
-                                stats_group.create_dataset(name, data=stats[name])
-                            stats_saved = True
+                        stats_group = hdf.create_group(
+                            "stats"
+                        )  # Always create stats group
 
                         # Save all particle features
                         for name in part_feature_names:
@@ -358,6 +353,10 @@ def main(args):
                         # Save mask, labels
                         hdf.create_dataset("labels", data=temp_labels[:current_index])
                         hdf.create_dataset("mask", data=temp_mask[:current_index])
+
+                        # Always save stats in every file
+                        for name in stats:
+                            stats_group.create_dataset(name, data=stats[name])
 
                     file_counter += 1
                     print(f"----finished creating {file_counter} files")
@@ -393,14 +392,9 @@ def main(args):
                     ) as hdf:
                         # Create groups
                         particles_group = hdf.create_group("particles")
-
-                        # Only create stats group and save stats for the first file
-                        if not stats_saved:
-                            stats_group = hdf.create_group("stats")
-                            # Save all stats
-                            for name in stats:
-                                stats_group.create_dataset(name, data=stats[name])
-                            stats_saved = True
+                        stats_group = hdf.create_group(
+                            "stats"
+                        )  # Always create stats group
 
                         # Save all particle features
                         for name in part_feature_names:
@@ -411,6 +405,10 @@ def main(args):
                         # Save mask, labels
                         hdf.create_dataset("labels", data=temp_labels[:current_index])
                         hdf.create_dataset("mask", data=temp_mask[:current_index])
+
+                        # Always save stats in every file
+                        for name in stats:
+                            stats_group.create_dataset(name, data=stats[name])
 
                     file_counter += 1
                     print(f"----finished creating {file_counter} files")
