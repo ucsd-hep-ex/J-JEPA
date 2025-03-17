@@ -51,7 +51,22 @@ def load_data_h5(data_files):
     # First file to determine available features and structure
     with h5py.File(data_files[0], "r") as hdf:
         part_feature_names = list(hdf["particles"].keys())
-        stats = {name: hdf["stats"][name][:] for name in hdf["stats"]}
+        # Check if stats group exists, handle case where it might not
+        stats = {}
+        if "stats" in hdf:
+            stats = {name: hdf["stats"][name][:] for name in hdf["stats"]}
+
+    # If stats not found in first file, check other files
+    if not stats:
+        for file in data_files[1:]:
+            try:
+                with h5py.File(file, "r") as hdf:
+                    if "stats" in hdf:
+                        stats = {name: hdf["stats"][name][:] for name in hdf["stats"]}
+                        print(f"Found stats in {file}")
+                        break
+            except Exception as e:
+                print(f"Error checking stats in {file}: {e}")
 
     # Initialize containers for data
     all_particles = {name: [] for name in part_feature_names}
@@ -134,6 +149,11 @@ def shuffle_dataset(input_dir, batch_size=10):
     temp_dir = f"{input_dir}_temp_shuffle"
     os.makedirs(temp_dir, exist_ok=True)
 
+    # Track original file indices to maintain the same numbering
+    file_indices = [
+        int(os.path.basename(f).split("_")[1].split(".")[0]) for f in data_files
+    ]
+
     # Process files in batches to manage memory
     for batch_start in range(0, len(data_files), batch_size):
         batch_end = min(batch_start + batch_size, len(data_files))
@@ -155,9 +175,15 @@ def shuffle_dataset(input_dir, batch_size=10):
         labels_batch = labels_batch[shuffle_indices]
         mask_batch = mask_batch[shuffle_indices]
 
-        # Save shuffled data
-        save_h5_in_chunks(
-            part_batch, labels_batch, mask_batch, stats, temp_dir, batch_size=100000
+        # Save shuffled data - use original file indices to maintain numbering
+        save_batch_with_indices(
+            part_batch,
+            labels_batch,
+            mask_batch,
+            stats,
+            temp_dir,
+            file_indices[batch_start:batch_end],
+            batch_size=100000,
         )
 
         # Free memory
@@ -168,6 +194,62 @@ def shuffle_dataset(input_dir, batch_size=10):
     shutil.rmtree(input_dir)
     os.rename(temp_dir, input_dir)
     print(f"Shuffling complete, replaced {input_dir} with shuffled data")
+
+
+def save_batch_with_indices(
+    part_batch,
+    labels_batch,
+    mask_batch,
+    stats,
+    save_dir,
+    file_indices,
+    batch_size=100000,
+):
+    """Save data in chunks, preserving original file indices"""
+    os.makedirs(save_dir, exist_ok=True)
+
+    # Calculate the number of samples per file
+    total_samples = labels_batch.shape[0]
+    samples_per_file = batch_size
+    num_files = len(file_indices)
+
+    # Calculate samples per original file (approximately even distribution)
+    samples_per_original_file = total_samples // num_files
+    remainder = total_samples % num_files
+
+    start_index = 0
+    for i, file_idx in enumerate(file_indices):
+        # Calculate how many samples go in this file (distribute remainder if any)
+        this_file_samples = samples_per_original_file + (1 if i < remainder else 0)
+        end_index = min(start_index + this_file_samples, total_samples)
+
+        # Skip if no samples for this file
+        if end_index <= start_index:
+            continue
+
+        # Create the output file
+        with h5py.File(f"{save_dir}/data_{file_idx}.h5", "w") as hdf:
+            # Create groups
+            particles_group = hdf.create_group("particles")
+
+            # Save particle features for this chunk
+            for name in part_batch.keys():
+                particles_group.create_dataset(
+                    name, data=part_batch[name][start_index:end_index]
+                )
+
+            # Save labels and mask
+            hdf.create_dataset("labels", data=labels_batch[start_index:end_index])
+            hdf.create_dataset("mask", data=mask_batch[start_index:end_index])
+
+            # Save stats in every file if they exist
+            if stats:
+                stats_group = hdf.create_group("stats")
+                for name in stats.keys():
+                    stats_group.create_dataset(name, data=stats[name])
+
+        print(f"Saved file data_{file_idx}.h5 with {end_index - start_index} samples")
+        start_index = end_index
 
 
 def main(args):
@@ -188,7 +270,9 @@ def main(args):
     frac_lst = [1, 5, 10, 50]
     total_samples = 100000  # 100k jets per file
 
-    current_index = 0  # Keep track of where to insert data
+    # Initialize file_counter outside the frac loop to maintain it across fractions
+    file_counter = 0
+
     for frac in frac_lst:
         file_counter = 0
         print(f"Sampling {frac}% of data from `{label}` directory")
@@ -285,19 +369,16 @@ def main(args):
             processed_dir = f"/j-jepa-vol/J-JEPA/data/JetClass/ptcl/{frac}%/{label}"
             os.system(f"mkdir -p {processed_dir}")
 
-            # Determine feature names dynamically from the first file
+            # Determine feature names and stats from the first file
             first_file = data_files[0]
             with h5py.File(first_file, "r") as hdf:
-                # Get all feature names from the particles group
                 part_feature_names = list(hdf["particles"].keys())
-                # Load stats
                 stats = {name: hdf["stats"][name][:] for name in hdf["stats"]}
 
             print(
                 f"Found {len(part_feature_names)} particle features: {part_feature_names}"
             )
 
-            # Initialize data structures for sampling
             data_shape = (total_samples, 128)  # Base shape for particle features
             label_shape = (total_samples, 10)  # Shape for labels
 
@@ -306,12 +387,12 @@ def main(args):
             temp_labels = np.zeros(label_shape)
             temp_mask = np.zeros(data_shape)
 
+            # Initialize counters once per fraction so that file numbering starts at 0 and increments
             file_counter = 0
             current_index = 0
 
             for i, file in enumerate(data_files):
                 with h5py.File(file, "r") as hdf:
-                    # Load all particle features
                     particles = {
                         name: hdf["particles"][name][:] for name in part_feature_names
                     }
@@ -323,100 +404,72 @@ def main(args):
                     f"--- loaded data file {i} {data_file_name} from `{label}` directory"
                 )
 
-                # Calculate number of samples to take
                 num_samples = int(frac / 100 * mask.shape[0])
-
-                # Generate random indices
                 indices = np.random.choice(mask.shape[0], num_samples, replace=False)
-
-                # Calculate new end index based on current batch
                 end_index = current_index + num_samples
 
-                # Check if the temp tensors can accommodate this batch; if not, save and reset
+                # If the current batch overflows the preallocated space, save the filled portion to disk.
                 if end_index > temp_mask.shape[0]:
-                    # Save the filled portion of the tensors
                     with h5py.File(
                         f"{processed_dir}/data_{file_counter}.h5", "w"
                     ) as hdf:
-                        # Create groups
                         particles_group = hdf.create_group("particles")
-                        stats_group = hdf.create_group(
-                            "stats"
-                        )  # Always create stats group
-
-                        # Save all particle features
+                        stats_group = hdf.create_group("stats")
                         for name in part_feature_names:
                             particles_group.create_dataset(
                                 name, data=temp_particles[name][:current_index]
                             )
-
-                        # Save mask, labels
                         hdf.create_dataset("labels", data=temp_labels[:current_index])
                         hdf.create_dataset("mask", data=temp_mask[:current_index])
-
-                        # Always save stats in every file
                         for name in stats:
                             stats_group.create_dataset(name, data=stats[name])
-
+                    print(
+                        f"----finished creating file data_{file_counter}.h5 with {current_index} samples"
+                    )
                     file_counter += 1
-                    print(f"----finished creating {file_counter} files")
-
-                    # Reset current index for the next batch of tensors
+                    # Reset for the next batch within the same fraction
                     current_index = 0
-                    end_index = num_samples  # As we are starting from 0 again
-
-                    # Reset current index for the next batch of tensors, only if not at the last file
+                    end_index = num_samples
                     if i != len(data_files) - 1:
-                        print("resetting temp storage tensors")
+                        print("resetting temporary storage tensors")
                         temp_particles = {
                             name: np.zeros(data_shape) for name in part_feature_names
                         }
                         temp_labels = np.zeros(label_shape)
                         temp_mask = np.zeros(data_shape)
 
-                # Fill pre-allocated tensors with the current batch
+                # Fill the preallocated arrays with the current file's sampled data
                 for name in part_feature_names:
                     temp_particles[name][current_index:end_index] = particles[name][
                         indices
                     ]
-
                 temp_labels[current_index:end_index] = labels[indices]
                 temp_mask[current_index:end_index] = mask[indices]
-                current_index = end_index  # Update current index
+                current_index = end_index
 
-                # Condition to save at the last file
+                # At the very end, save any remaining data in the temporary arrays
                 if i == len(data_files) - 1:
-                    # Save the filled portion of the tensors
                     with h5py.File(
                         f"{processed_dir}/data_{file_counter}.h5", "w"
                     ) as hdf:
-                        # Create groups
                         particles_group = hdf.create_group("particles")
-                        stats_group = hdf.create_group(
-                            "stats"
-                        )  # Always create stats group
-
-                        # Save all particle features
+                        stats_group = hdf.create_group("stats")
                         for name in part_feature_names:
                             particles_group.create_dataset(
                                 name, data=temp_particles[name][:current_index]
                             )
-
-                        # Save mask, labels
                         hdf.create_dataset("labels", data=temp_labels[:current_index])
                         hdf.create_dataset("mask", data=temp_mask[:current_index])
-
-                        # Always save stats in every file
                         for name in stats:
                             stats_group.create_dataset(name, data=stats[name])
-
+                    print(
+                        f"----finished creating file data_{file_counter}.h5 with {current_index} samples"
+                    )
                     file_counter += 1
-                    print(f"----finished creating {file_counter} files")
 
                 del particles, labels, mask
                 gc.collect()
 
-            # Now shuffle the sampled data
             print(f"Now shuffling the sampled {frac}% data...")
             shuffle_dataset(processed_dir, batch_size=5)
 
