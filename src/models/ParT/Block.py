@@ -64,13 +64,6 @@ class Block(nn.Module):
         Returns:
             encoded output of shape `(seq_len, batch, embed_dim)`
         """
-        if padding_mask is not None:
-            if (padding_mask.sum(dim=1) == padding_mask.shape[1]).any():
-                full_masked = padding_mask.sum(dim=1) == padding_mask.shape[1]
-                if full_masked.any():
-                    padding_mask[full_masked, 0] = False #unmask dummy token
-        else:
-            print("padding_mask is None!")
 
         if x_cls is not None:
             with torch.no_grad():
