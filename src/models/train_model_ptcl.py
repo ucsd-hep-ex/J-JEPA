@@ -416,6 +416,9 @@ def main(rank, world_size, args):
             particle_mask = particle_mask.to(
                 device, non_blocking=True, dtype=torch.float32
             )
+            
+            # move a copy of particle mask to cpu to match context/target masks
+            particle_mask_cpu = particle_mask.cpu().bool()
 
             while True:
                 context_masks, target_masks = create_random_masks(
@@ -423,9 +426,10 @@ def main(rank, world_size, args):
                     ratio=options.trgt_ratio,
                     max_targets=options.max_targets,
                 )
+                
                 # for each jet, count how many particles are real in both the context/target masks
-                real_context_counts = (context_masks & particle_mask).sum(dim=1)
-                real_target_counts = (target_masks & particle_mask).sum(dim=1)
+                real_context_counts = (context_masks & particle_mask_cpu).sum(dim=1)
+                real_target_counts = (target_masks & particle_mask_cpu).sum(dim=1)
                 
                 # keep looping until every jet has >= 1 real context and >= 1 real target particle
                 if (real_context_counts > 0).all() and (real_target_counts > 0).all():
