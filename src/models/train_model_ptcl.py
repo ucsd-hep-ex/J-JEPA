@@ -578,6 +578,9 @@ def main(rank, world_size, args):
         )
 
         for itr, (p4_spatial, p4, particle_mask) in enumerate(pbar_v):
+            if itr < 905:
+                continue
+            
             particle_mask = particle_mask.squeeze(-1).bool()
             p4 = p4.to(dtype=torch.float32)
             p4_spatial = p4_spatial.to(dtype=torch.float32)
