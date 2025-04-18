@@ -578,7 +578,7 @@ def main(rank, world_size, args):
         )
 
         for itr, (p4_spatial, p4, particle_mask) in enumerate(pbar_v):
-            if itr < 905:
+            if itr < 1810:
                 continue
             
             particle_mask = particle_mask.squeeze(-1).bool()
