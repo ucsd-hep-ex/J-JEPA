@@ -431,8 +431,8 @@ def main(rank, world_size, args):
                 real_context_counts = (context_masks & particle_mask_cpu).sum(dim=1)
                 real_target_counts = (target_masks & particle_mask_cpu).sum(dim=1)
                 
-                # keep looping until every jet has >= 1 real context and >= 1 real target particle
-                if (real_context_counts > 0).all() and (real_target_counts > 0).all():
+                # keep looping until >= 1 real context and >= 1 real target particle for any jet
+                if (real_context_counts > 0).any() and (real_target_counts > 0).any():
                     break
                
             context_masks = context_masks.to(device)
