@@ -420,6 +420,18 @@ def main(rank, world_size, args):
             # move a copy of particle mask to cpu to match context/target masks
             particle_mask_cpu = particle_mask.cpu().bool()
 
+            # check how many real particles each jet has
+            total_real_particles = particle_mask_cpu.sum(dim = 1)
+            multi_real = total_real > 1
+
+            # if there is a jet with only one real particle, filter it out of the batch
+            if not multi_real.all():
+                valid = multi_real.nonzero(as_tuple=True)[0]
+                p4_spatial = p4_spatial[valid]
+                p4 = p4[valid]
+                particle_mask = particle_mask[valid]
+                particle_mask_cpu = particle_mask_cpu[valid]
+
             while True:
                 context_masks, target_masks = create_random_masks(
                     p4_spatial,
@@ -432,7 +444,7 @@ def main(rank, world_size, args):
                 real_target_counts = (target_masks & particle_mask_cpu).sum(dim=1)
                 
                 # keep looping until >= 1 real context and >= 1 real target particle for any jet
-                if (real_context_counts > 0).any() and (real_target_counts > 0).any():
+                if (real_context_counts > 0).all() and (real_target_counts > 0).all():
                     break
                
             context_masks = context_masks.to(device)
