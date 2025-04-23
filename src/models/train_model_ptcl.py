@@ -422,7 +422,7 @@ def main(rank, world_size, args):
 
             # check how many real particles each jet has
             total_real_particles = particle_mask_cpu.sum(dim = 1)
-            multi_real = total_real > 1
+            multi_real = total_real_particles > 1
 
             # if there is a jet with only one real particle, filter it out of the batch
             if not multi_real.all():
