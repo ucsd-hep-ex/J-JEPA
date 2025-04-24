@@ -4,125 +4,154 @@ import h5py
 import os
 import numpy as np
 from collections import namedtuple
-import gc
+from functools import lru_cache
 
-DataSample = namedtuple("DataSample", ["p4_spatial", "p4", "mask"])
-DataSample_label = namedtuple(
-    "DataSample_label", ["p4_spatial", "p4", "mask", "labels"]
-)
-
+DataSample       = namedtuple("DataSample",       ["p4_spatial", "p4", "mask"])
+DataSample_label = namedtuple("DataSample_label", ["p4_spatial", "p4", "mask", "labels"])
 
 class ParticleDataset(Dataset):
-    def __init__(self, directory_path, num_jets=None, return_labels=False):
-        self.return_labels = return_labels
-        # Initialize data containers
-        particles_dict = {}  # Will hold lists of particle data arrays
-        labels_list = []
-        mask_list = []
-        self.stats = {}  # Will store the first occurrence of each stat
+    """
+    description:
+        this version of ParticleDataset contains the following features:
+            - Content cache:  preloads small files into CPU RAM up to cache_size_gb
+            - LRU file cache: keeps up to 8 HDF5 files open to avoid reopening
+            - For uncached files: reads only the single requested jet 
+    """
+    def __init__(
+        self,
+        directory_path,
+        num_jets=None,
+        return_labels=False,
+        cache_size_gb= 128.0,
+        size_multiplier=1.2,
+    ):
+        self.return_labels     = return_labels
 
-        # Loop through files in the directory
-        for filename in os.listdir(directory_path):
-            if filename.endswith(".hdf5") or filename.endswith(".h5"):
-                file_path = os.path.join(directory_path, filename)
-                with h5py.File(file_path, "r") as hdf:
-                    print(f"Loading {directory_path}/{filename}")
-                    particles = {
-                        name: hdf["particles"][name][:] for name in hdf["particles"]
-                    }
-                    labels = hdf["labels"][:]
-                    mask = hdf["mask"][:]
-                    stats = {name: hdf["stats"][name][:] for name in hdf["stats"]}
+        # sort all hfd5 files in directory, treating each file as a long concatenated dataset of jets
+        self.files = sorted(
+            os.path.join(directory_path, f)
+            for f in os.listdir(directory_path)
+            if f.endswith((".h5", ".hdf5"))
+        )
+        if not self.files:
+            raise ValueError(f"No HDF5 files in {directory_path!r}")
 
-                # Append data to lists/dicts
-                for key in particles:
-                    if key not in particles_dict:
-                        particles_dict[key] = []
-                    particles_dict[key].append(particles[key])
+        # read stats once 
+        with h5py.File(self.files[0], "r") as f0:
+            stats = {k: f0["stats"][k][:] for k in f0["stats"]}
+        self.mean_log_e, self.std_log_e = stats["part_e_log"]
+        self.stats = stats
 
-                labels_list.append(labels)
-                mask_list.append(mask)
+        # compute number of jets per file
+        lengths = []
+        for fn in self.files:
+            with h5py.File(fn, "r") as f:
+                lengths.append(f["labels"].shape[0])
+                
+        # truncate files based on num_jets ( if specified )        
+        if num_jets is not None and num_jets < sum(lengths):
+            capped, cum = [], 0
+            for fn, L in zip(self.files, lengths):
+                if cum + L < num_jets:
+                    capped.append(L); cum += L
+                else:
+                    capped.append(num_jets - cum)
+                    break
+            lengths = capped
+            self.files = self.files[: len(lengths)]
+        
+        # convert to np.array and build cumulative sum
+        self.file_lengths = np.array(lengths, dtype=int)
+        self.cum_lengths  = np.concatenate([[0], np.cumsum(self.file_lengths)])
+        self._total       = int(self.cum_lengths[-1])
 
-                # For stats, only store the first occurrence of each
-                for key in stats:
-                    if key not in self.stats:  # Only add if not already present
-                        self.stats[key] = stats[key]
+        # content cache: uses sorted order of file sizes and preloads into CPU ram up to cache_size_gb
+        self.cache_size_bytes = int(cache_size_gb * 1024**3)
+        self.size_multiplier  = size_multiplier
+        self.content_cache    = {}
+        self.total_cached     = 0
+        self._preload_content()
 
-                print(f"Loaded {directory_path}/{filename}")
+    def _estimate_size(self, path: str) -> int:
+        """
+        helper function for calculating how many bytes the file will occupy in CPU ram
+        """
+        return int(os.path.getsize(path) * self.size_multiplier)
 
-        # Concatenate all the data
-        self.particles = {
-            key: np.concatenate(particles_dict[key], axis=0) for key in particles_dict
-        }
-        self.labels = np.concatenate(labels_list, axis=0)
-        self.mask = np.concatenate(mask_list, axis=0)
+    def _preload_content(self):
+        """
+        walks through the files in sorted order, and checks if adding the estimated size will exceed the cache limit.
+        if not, then all the datasets are read into np.arrays depending on if it will fit into the cache.
+        """
+        # go thru files in sorted order
+        for fn in sorted(self.files, key=self._estimate_size):
+            est = self._estimate_size(fn)
+            # check if the estimated cache size is larger than the cache limit
+            if self.total_cached + est > self.cache_size_bytes:
+                break
+            # read file into memory
+            with h5py.File(fn, "r") as f:
+                data = {k: f["particles"][k][:] for k in f["particles"]}
+                data["mask"]   = f["mask"][:]
+                data["labels"] = f["labels"][:]
+            actual = sum(arr.nbytes for arr in data.values())
+            if self.total_cached + actual <= self.cache_size_bytes:
+                self.content_cache[fn] = data
+                self.total_cached     += actual
+            else:
+                break  # exceeds cache limit
 
-        part_features = (
-            particles_dict.keys()
-        )  # [part_px, part_py, part_pz, part_deta, part_dphi, part_pt_log, part_e_log]
-        mean_log_e, std_log_e = self.stats["part_e_log"]
-        log_e = self.particles["part_e_log"] * std_log_e + mean_log_e
-        norm_energy = np.exp(log_e) * self.mask
-        self.p4_spatial = np.stack(
-            [self.particles[key] for key in ["part_px", "part_py", "part_pz"]]
-            + [norm_energy],
-            axis=1,
-        )  # for pos emb
-        self.p4 = np.stack(
-            [
-                self.particles[key]
-                for key in ["part_deta", "part_dphi", "part_pt_log", "part_e_log"]
-            ],
-            axis=1,
-        )  # for input to J-JEPA
-
-        # Limit to num_jets if specified
-        if num_jets:
-            self.labels = self.labels[:num_jets]
-            self.mask = self.mask[:num_jets]
-            self.p4_spatial = self.p4_spatial[:num_jets]
-            self.p4 = self.p4[:num_jets]
-            for key in self.stats:
-                self.stats[key] = self.stats[key][:num_jets]
-        # print(f"p4_spatial shape: {self.p4_spatial.shape}")
-        # print(f"mask shape: {self.mask.shape}")
-        self.p4_spatial = self.p4_spatial.transpose(0, 2, 1)  # (num_jets, num_ptcls, 4)
-        self.p4 = self.p4.transpose(0, 2, 1)  # (num_jets, num_ptcls, 4)
-
-        if self.return_labels:
-            print(
-                "__getitem__ returns",
-                [
-                    "p4_spatial (px, py, pz, e)",
-                    "p4 (eta, phi, log_pt, log_e)",
-                    "mask",
-                    "labels",
-                ],
-            )
-        else:
-            print(
-                "__getitem__ returns",
-                ["p4_spatial (px, py, pz, e)", "p4 (eta, phi, log_pt, log_e)", "mask"],
-            )
-        del self.particles
-        gc.collect()
+    @lru_cache(maxsize=8)
+    def _get_file_handle(self, fn: str) -> h5py.File:
+        """
+        opens and caches up to 8 HDF5 files to avoid reopening memory cost
+        """
+        return h5py.File(fn, "r")
 
     def __len__(self):
-        return len(self.labels)
+        return self._total
 
     def __getitem__(self, idx):
-        if self.return_labels:
-            sample = DataSample_label(
-                p4_spatial=torch.from_numpy(self.p4_spatial[idx]),
-                p4=torch.from_numpy(self.p4[idx]),
-                mask=torch.from_numpy(self.mask[idx]).unsqueeze(1),
-                labels=self.labels[idx],
-            )
-        else:
-            sample = DataSample(
-                p4_spatial=torch.from_numpy(self.p4_spatial[idx]),
-                p4=torch.from_numpy(self.p4[idx]),
-                mask=torch.from_numpy(self.mask[idx]).unsqueeze(1),
-            )
+        """
+        
+        """
+        # Map global idx → file and local index
+        file_idx  = int(np.searchsorted(self.cum_lengths, idx, side="right") - 1)
+        local_idx = int(idx - self.cum_lengths[file_idx])
+        fn        = self.files[file_idx]
 
-        return sample
+        if fn in self.content_cache:
+            # fast path: slice from cache arrays
+            data = self.content_cache[fn]
+            p_px, p_py, p_pz = data["part_px"][local_idx], data["part_py"][local_idx], data["part_pz"][local_idx]
+            p_deta, p_dphi  = data["part_deta"][local_idx], data["part_dphi"][local_idx]
+            p_ptl, p_el     = data["part_pt_log"][local_idx], data["part_e_log"][local_idx]
+            mask            = data["mask"][local_idx]
+            labels          = data["labels"][local_idx] if self.return_labels else None
+        else:
+            # slow path: read one jet from disk via cached file handle
+            f = self._get_file_handle(fn)
+            p_px   = f["particles"]["part_px"][local_idx]
+            p_py   = f["particles"]["part_py"][local_idx]
+            p_pz   = f["particles"]["part_pz"][local_idx]
+            p_deta = f["particles"]["part_deta"][local_idx]
+            p_dphi = f["particles"]["part_dphi"][local_idx]
+            p_ptl  = f["particles"]["part_pt_log"][local_idx]
+            p_el   = f["particles"]["part_e_log"][local_idx]
+            mask   = f["mask"][local_idx]
+            labels = f["labels"][local_idx] if self.return_labels else None
+
+        # reconstruct p4, p4_spatial
+        log_e      = p_el * self.std_log_e + self.mean_log_e
+        norm_e     = np.exp(log_e) * mask
+        p4_spatial = np.stack([p_px, p_py, p_pz, norm_e], axis=1)
+        p4         = np.stack([p_deta, p_dphi, p_ptl, p_el], axis=1)
+
+        p_spatial = torch.from_numpy(p4_spatial)
+        p4      = torch.from_numpy(p4)
+        p_mask    = torch.from_numpy(mask).unsqueeze(1)
+
+        if self.return_labels:
+            return DataSample_label(p_spatial, p4, p_mask, labels)
+        else:
+            return DataSample(p_spatial, p4, p_mask)
