@@ -178,6 +178,10 @@ def main(args):
     logfile = open(args.logfile, "a")
     if not args.from_checkpoint:
         print("logfile initialised", file=logfile, flush=True)
+        # print all arguments
+        print("arguments:")
+        for arg in vars(args):
+            print(f"{arg}: {getattr(args, arg)}", file=logfile, flush=True)
         print("output dimension: " + str(args.output_dim), file=logfile, flush=True)
         if not args.cls:
             if args.flatten:
