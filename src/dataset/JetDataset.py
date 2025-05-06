@@ -108,16 +108,17 @@ class JetDataset(Dataset):
             for name in self.subjets.keys():
                 print(f"shape of {name}: {self.subjets[name].shape}")
 
-        # Normalize each particle feature
-        # For each key, the array is of shape (num_jets, num_particles)
-        # We compute the mean and std over both dimensions (axes 0 and 1)
-        for key in self.particles:
+        # Normalize pT and Energy
+        # - [part_pt_log, 1.7, 0.7]
+        # - [part_e_log, 2.0, 0.7]
+        for key in ["part_e_log", "part_pt_log"]:
             data = self.particles[key]
-            mean = np.mean(data, axis=(0, 1), keepdims=True)
-            std = np.std(data, axis=(0, 1), keepdims=True)
-            # Prevent division by zero: if std == 0, set it to 1.0
-            std[std == 0] = 1.0
-            self.particles[key] = (data - mean) / std
+            mean = 1.7 if key == "part_pt_log" else 2.0
+            std = 0.7
+            # Create a mask for non-zero entries
+            mask = data != 0
+            # Only normalize non-zero entries
+            self.particles[key] = np.where(mask, (data - mean) / std, data)
 
         self.filter_good_jets()
 
