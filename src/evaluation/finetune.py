@@ -288,7 +288,7 @@ def main(args):
     def warmup(epoch):
         return (epoch+1)/warmup_epoch
 
-    warmup_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=[warmup])
+    warmup_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=warmup)
 
     # cosine annealing scheduler
     T_0 = 100
