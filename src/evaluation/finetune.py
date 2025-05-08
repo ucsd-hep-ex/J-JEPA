@@ -175,8 +175,6 @@ def main(args):
 
     # initialise tensorboard writer
     writer = SummaryWriter(log_dir=out_dir)
-    writer.add_hparams({'lr': args.learning_rate,
-                        'bsize': args.batch_size})
 
     # initialise logfile
     args.logfile = f"{out_dir}/logfile.txt"
@@ -293,7 +291,7 @@ def main(args):
 
     # cosine annealing scheduler
     T_0 = 100
-    T_mult = 2
+    T_mult = 1
     cosine_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0, T_mult)
 
     # combine those lr schedulers
@@ -553,11 +551,19 @@ def main(args):
         writer.add_scalar('acc/val', acc_val_all[-1], epoch)
         # bkg rejection
         writer.add_scalar('bkg_rejection/val', imtafe, epoch)
+        # hyper params
+        writer.add_scalar('hparams/batch_size', args.batch_size, epoch)
 
         # update learning rate scheduler
         scheduler.step()
 
     # Training done
+    writer.add_hparams({'lr': args.learning_rate,
+                        'bsize': args.batch_size,
+                        'cls': args.cls,
+                        'emb_type': options.embedding_layers_type},
+                       {'highest accuracy': acc_val_best,
+                        "highest bkg rej": rej_val_best})
     print("Training done", flush=True, file=logfile)
 
 
@@ -620,7 +626,7 @@ if __name__ == "__main__":
         type=int,
         action="store",
         dest="n_epochs",
-        default=1500,
+        default=500,
         help="Epochs",
     )
     parser.add_argument(
