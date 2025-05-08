@@ -115,9 +115,8 @@ def get_subjets(px, py, pz, e, JET_ALGO="CA", jet_radius=0.2, return_sorted=True
 
     # subjets_info_sorted now contains the subjets sorted by pT in descending order
     return subjets_info_sorted
-
-
-def create_random_masks(p4_spatial, ratio, max_targets, return_sorted=True):
+from concurrent.futures import ThreadPoolExecutor, as_completed
+def create_random_masks(p4_spatial, ratio, max_targets, return_sorted=True, max_workers = None):
     """
     Creates context and target masks for a batch of jets based on the provided ratio and max_targets.
 
@@ -134,43 +133,46 @@ def create_random_masks(p4_spatial, ratio, max_targets, return_sorted=True):
     p4_spatial = p4_spatial.transpose(1, 2)
     batch_size, _, total_num_particles_padded = p4_spatial.shape
 
-    context_masks = torch.zeros(
-        (batch_size, total_num_particles_padded), dtype=torch.float32
+    # prepare per-jet inputs
+    jobs = [
+        (p4_spatial[i], ratio, max_targets, return_sorted)
+        for i in range(batch_size)
+    ]
+    
+    context_list = [None] * batch_size
+    target_list = [None] * batch_size
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_idx = {
+            executor.submit(_make_masks_for_jet, *job): idx
+            for idx, job in enumerate(jobs)
+        }
+        # store result
+        for future in as_completed(future_to_idx):
+            idx = future_to_idx[future]
+            context_list[idx], target_list[idx] = future.result()
+
+    # stack back into torch tensors
+    context_masks = torch.stack(context_list).bool()
+    target_masks = torch.stack(target_list).bool()
+    return context_masks, target_masks
+
+def _make_masks_for_jet(p4_jet, ratio, max_targets, return_sorted):
+    # p4_jet shape: (4, N_padded)
+    px, py, pz, e = p4_jet
+    N_non_padded = int(torch.count_nonzero(e).item())
+    subjets = get_subjets(px, py, pz, e,
+                         JET_ALGO="CA",
+                         jet_radius=0.2,
+                         return_sorted=return_sorted)
+    context_mask, target_mask = create_random_masks_single(
+        subjets,
+        N_non_padded,
+        p4_jet.shape[-1],
+        ratio,
+        max_targets
     )
-    target_masks = torch.zeros(
-        (batch_size, total_num_particles_padded), dtype=torch.float32
-    )
-
-    for i in tqdm(range(batch_size)):
-        # Extract px, py, pz, e for this jet
-        px = p4_spatial[i, 0, :]  # Shape: (total_num_particles_padded,)
-        py = p4_spatial[i, 1, :]
-        pz = p4_spatial[i, 2, :]
-        e = p4_spatial[i, 3, :]
-
-        # Get N_non_padded by counting non-zero entries in e
-        N_non_padded = torch.count_nonzero(e)
-
-        # Call get_subjets
-        subjets_info_sorted = get_subjets(
-            px, py, pz, e, JET_ALGO="CA", jet_radius=0.2, return_sorted=return_sorted
-        )
-
-        # Create masks for this jet
-        context_mask, target_mask = create_random_masks_single(
-            subjets_info_sorted,
-            N_non_padded.item(),
-            total_num_particles_padded,
-            ratio,
-            max_targets,
-        )
-
-        # Assign to the batch masks
-        context_masks[i] = context_mask
-        target_masks[i] = target_mask
-
-    return context_masks.bool(), target_masks.bool()
-
+    return context_mask, target_mask
 
 def create_random_masks_single(
     subjets_info_sorted, N_non_padded, total_num_particles_padded, ratio, max_targets
