@@ -156,7 +156,7 @@ def main(args):
         args.output_dim *= 20
     out_dir = args.out_dir
     args.opt = "adam"
-    args.learning_rate = 0.00005 * (args.batch_size / 128)**2
+    args.learning_rate = 0.001 * (args.batch_size/1024)
 
     # check if experiment already exists and is not empty
     if not args.from_checkpoint:
@@ -296,7 +296,7 @@ def main(args):
     cosine_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0, T_mult)
 
     # combine those lr schedulers
-    scheduler = torch.optim.lr_scheduler.SequentialLR(optimizer, schedulers=[warmup_scheduler, cosine_scheduler], milestones=[warmup_epoch])
+    scheduler = torch.optim.lr_scheduler.SequentialLR(optimizer, schedulers=[warmup_scheduler, cosine_scheduler], milestones=warmup_epoch)
 
     loss = nn.CrossEntropyLoss(reduction="mean")
     epoch_start = 0
