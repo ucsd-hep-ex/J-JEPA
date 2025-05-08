@@ -24,6 +24,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 import torch.optim as optim
+from torch.utils.tensorboard import SummaryWriter
 
 from sklearn.metrics import accuracy_score
 from sklearn import metrics
@@ -155,7 +156,7 @@ def main(args):
         args.output_dim *= 20
     out_dir = args.out_dir
     args.opt = "adam"
-    args.learning_rate = 0.00005 * args.batch_size / 128
+    args.learning_rate = 0.00005 * (args.batch_size / 128)**2
 
     # check if experiment already exists and is not empty
     if not args.from_checkpoint:
@@ -172,6 +173,9 @@ def main(args):
 
     # Create the directory
     os.makedirs(out_dir, exist_ok=True)
+
+    # initialise tensorboard writer
+    writer = SummaryWriter(log_dir=out_dir)
 
     # initialise logfile
     args.logfile = f"{out_dir}/logfile.txt"
@@ -269,13 +273,30 @@ def main(args):
     print(f"finetune mlp: {proj}", flush=True, file=logfile)
     if args.finetune:
         optimizer = optim.Adam(
-            [{"params": proj.parameters()}, {"params": net.parameters(), "lr": 1e-6}],
+            [{"params": proj.parameters()}, {"params": net.parameters()}],
             lr=args.learning_rate,
         )
         net.train()
     else:
         net.eval()
         optimizer = optim.Adam(proj.parameters(), lr=args.learning_rate)
+
+    # add lr scheduler
+    # warm up scheduler
+    warmup_epoch = 5
+
+    def warmup(epoch):
+        return (epoch+1)/warmup_epoch
+
+    warmup_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=[warmup])
+
+    # cosine annealing scheduler
+    T_0 = 100
+    T_mult = 2
+    cosine_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0, T_mult)
+
+    # combine those lr schedulers
+    scheduler = torch.optim.lr_scheduler.SequentialLR(optimizer, schedulers=[warmup_scheduler, cosine_scheduler], milestones=[warmup_epoch])
 
     loss = nn.CrossEntropyLoss(reduction="mean")
     epoch_start = 0
@@ -520,6 +541,21 @@ def main(args):
         }
         torch.save(save_dict, f"{out_dir}/last_checkpoint.pt")
 
+        # write tensorboard
+        # lr
+        for i, group in enumerate(optimizer.param_groups):
+            writer.add_scalar(f'learning_rate/group_{i}', group['lr'], epoch)
+        # loss
+        writer.add_scalar('loss/train', loss_e, epoch)
+        writer.add_scalar('loss/val', loss_e_val, epoch)
+        # acc
+        writer.add_scalar('acc/val', acc_val_all[-1], epoch)
+        # bkg rejection
+        writer.add_scalar('bkg_rejection/val', imtafe, epoch)
+
+        # update learning rate scheduler
+        scheduler.step()
+
     # Training done
     print("Training done", flush=True, file=logfile)
 
@@ -583,7 +619,7 @@ if __name__ == "__main__":
         type=int,
         action="store",
         dest="n_epochs",
-        default=300,
+        default=1500,
         help="Epochs",
     )
     parser.add_argument(
