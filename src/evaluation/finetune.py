@@ -156,7 +156,6 @@ def main(args):
         args.output_dim *= 20
     out_dir = args.out_dir
     args.opt = "adam"
-    args.learning_rate = 0.001 * (args.batch_size/1024)
 
     # check if experiment already exists and is not empty
     if not args.from_checkpoint:
@@ -176,6 +175,8 @@ def main(args):
 
     # initialise tensorboard writer
     writer = SummaryWriter(log_dir=out_dir)
+    writer.add_hparams({'lr': args.learning_rate,
+                        'bsize': args.batch_size})
 
     # initialise logfile
     args.logfile = f"{out_dir}/logfile.txt"
@@ -681,6 +682,14 @@ if __name__ == "__main__":
         dest="small",
         default=1,
         help="whether to use a small dataset (10%) for finetuning",
+    )
+    parser.add_argument(
+        "--learning-rate",
+        type=float,
+        action="store",
+        dest="learning_rate",
+        default=1e-4,
+        help="Maximum learning rate"
     )
 
     args = parser.parse_args()
