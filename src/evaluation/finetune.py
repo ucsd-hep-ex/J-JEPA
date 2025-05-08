@@ -296,7 +296,7 @@ def main(args):
     cosine_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0, T_mult)
 
     # combine those lr schedulers
-    scheduler = torch.optim.lr_scheduler.SequentialLR(optimizer, schedulers=[warmup_scheduler, cosine_scheduler], milestones=warmup_epoch)
+    scheduler = torch.optim.lr_scheduler.SequentialLR(optimizer, schedulers=[warmup_scheduler, cosine_scheduler], milestones=[warmup_epoch])
 
     loss = nn.CrossEntropyLoss(reduction="mean")
     epoch_start = 0
