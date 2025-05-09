@@ -116,7 +116,7 @@ def get_subjets(px, py, pz, e, JET_ALGO="CA", jet_radius=0.2, return_sorted=True
     # subjets_info_sorted now contains the subjets sorted by pT in descending order
     return subjets_info_sorted
 from concurrent.futures import ThreadPoolExecutor, as_completed
-def create_random_masks(p4_spatial, ratio, max_targets, return_sorted=True, max_workers = None):
+def create_random_masks(p4_spatial, ratio, max_targets, return_sorted=True):
     """
     Creates context and target masks for a batch of jets based on the provided ratio and max_targets.
 
@@ -142,7 +142,7 @@ def create_random_masks(p4_spatial, ratio, max_targets, return_sorted=True, max_
     context_list = [None] * batch_size
     target_list = [None] * batch_size
 
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+    with ThreadPoolExecutor() as executor:
         future_to_idx = {
             executor.submit(_make_masks_for_jet, *job): idx
             for idx, job in enumerate(jobs)
