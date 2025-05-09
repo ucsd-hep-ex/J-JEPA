@@ -6,6 +6,7 @@ import numpy as np
 import awkward as ak
 import fastjet
 import vector
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 def get_subjets(px, py, pz, e, JET_ALGO="CA", jet_radius=0.2, return_sorted=True):
@@ -115,7 +116,7 @@ def get_subjets(px, py, pz, e, JET_ALGO="CA", jet_radius=0.2, return_sorted=True
 
     # subjets_info_sorted now contains the subjets sorted by pT in descending order
     return subjets_info_sorted
-from concurrent.futures import ThreadPoolExecutor, as_completed
+
 def create_random_masks(p4_spatial, ratio, max_targets, return_sorted=True):
     """
     Creates context and target masks for a batch of jets based on the provided ratio and max_targets.
@@ -191,48 +192,50 @@ def create_random_masks_single(
     - context_mask: Torch tensor of shape (total_num_particles_padded,), with 1s for context particles and 0s elsewhere.
     - target_mask: Torch tensor of shape (total_num_particles_padded,), with 1s for target particles and 0s elsewhere.
     """
-    # Calculate the initial number of target particles based on the ratio
+    # calculate the initial number of target particles based on the ratio
     num_targets_real = min(int(round(ratio * N_non_padded)), max_targets)
     num_targets = max_targets
 
-    target_mask = torch.zeros(total_num_particles_padded, dtype=torch.float32)
-    selected_indices = []
+    # flatten all real indices
+    flat = torch.tensor(
+        [idx for subj in subjets_info_sorted for idx in subj["indices"]],
+        dtype=torch.long
+    )
 
-    # Collect particles from subjets starting from the highest pT subjet
-    for subjet in subjets_info_sorted:
-        indices = subjet["indices"]  # Indices of particles in the subjet
-        for index in indices:
-            if index not in selected_indices:
-                selected_indices.append(index)
-                if len(selected_indices) >= num_targets_real:
-                    break
-        if len(selected_indices) >= num_targets_real:
-            break
+    if num_targets_real == 0 and N_non_padded > 0:
+        nonpad = flat[:1]
+    else:
+        nonpad = flat[:num_targets_real]
 
     # If not enough target particles have been selected, select from padded particles to reach max_targets
-    if len(selected_indices) < num_targets:
-        num_needed = num_targets - len(selected_indices)
-        padded_indices = list(range(N_non_padded, total_num_particles_padded))
-        num_padded_available = len(padded_indices)
-        num_padded_to_select = min(num_needed, num_padded_available)
-        if num_padded_to_select > 0:
-            additional_padded_indices = torch.tensor(
-                torch.multinomial(
-                    torch.ones(num_padded_available),
-                    num_padded_to_select,
-                    replacement=False,
-                )
+    total_selected = nonpad.numel()
+    if total_selected < num_targets:
+        num_needed = num_targets - total_selected
+        padded = torch.arange(N_non_padded, total_num_particles_padded, dtype=torch.long)
+        if padded.numel() > 0:
+            choice = torch.multinomial(
+                torch.ones(padded.numel()),
+                min(num_needed, padded.numel()),
+                replacement=False
             )
-            selected_indices.extend(
-                padded_indices[i] for i in additional_padded_indices.tolist()
-            )
+            pad_inds = padded[choice]
+            target_inds = torch.cat([nonpad, pad_inds])
+        else:
+            target_inds = nonpad
+    else:
+        target_inds = nonpad
 
+    # convert into masks
+    target_mask = torch.zeros(
+        total_num_particles_padded,
+        dtype=torch.float32,
+        device=flat.device
+    )
     # Set target_mask for selected indices
-    target_mask[selected_indices] = 1.0
-
+    if target_inds.numel() > 0:
+        target_mask[target_inds] = 1.0
     # Context mask is the complement of target mask
     context_mask = 1.0 - target_mask
-
     return context_mask, target_mask
 
 
