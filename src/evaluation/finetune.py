@@ -56,9 +56,9 @@ def Projector(mlp, embedding):
 # load data
 def load_data(args, dataset_path, tag=None):
     # data_dir = f"{dataset_path}/{flag}/processed/4_features"
-    num_jets = None
-    if args.small:
-        num_jets = 100 * 1000
+    num_jets = (
+        max(int(1211000 * args.percent / 100), 785767) if args.percent < 100 else None
+    )
     datset = JetDataset(dataset_path, labels=True, num_jets=num_jets)
     dataloader = DataLoader(datset, batch_size=args.batch_size, shuffle=True)
     return dataloader
@@ -224,16 +224,7 @@ def main(args):
     print("loading data")
     train_dataloader = load_data(args, args.train_dataset_path, "train")
     val_dataloader = load_data(args, args.val_dataset_path, "val")
-    if args.small:
-        print("using small dataset for finetuning", file=logfile, flush=True)
-        print(
-            f"number of jets: {len(train_dataloader.dataset)}", file=logfile, flush=True
-        )
-    else:
-        print("using full dataset for finetuning", file=logfile, flush=True)
-        print(
-            f"number of jets: {len(train_dataloader.dataset)}", file=logfile, flush=True
-        )
+    print(f"number of jets: {len(train_dataloader.dataset)}", file=logfile, flush=True)
 
     t1 = time.time()
 
@@ -285,17 +276,23 @@ def main(args):
     warmup_epoch = 5
 
     def warmup(epoch):
-        return (epoch+1)/warmup_epoch
+        return (epoch + 1) / warmup_epoch
 
     warmup_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=warmup)
 
     # cosine annealing scheduler
     T_0 = 100
     T_mult = 1
-    cosine_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0, T_mult)
+    cosine_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+        optimizer, T_0, T_mult
+    )
 
     # combine those lr schedulers
-    scheduler = torch.optim.lr_scheduler.SequentialLR(optimizer, schedulers=[warmup_scheduler, cosine_scheduler], milestones=[warmup_epoch])
+    scheduler = torch.optim.lr_scheduler.SequentialLR(
+        optimizer,
+        schedulers=[warmup_scheduler, cosine_scheduler],
+        milestones=[warmup_epoch],
+    )
 
     loss = nn.CrossEntropyLoss(reduction="mean")
     epoch_start = 0
@@ -543,27 +540,30 @@ def main(args):
         # write tensorboard
         # lr
         for i, group in enumerate(optimizer.param_groups):
-            writer.add_scalar(f'learning_rate/group_{i}', group['lr'], epoch)
+            writer.add_scalar(f"learning_rate/group_{i}", group["lr"], epoch)
         # loss
-        writer.add_scalar('loss/train', loss_e, epoch)
-        writer.add_scalar('loss/val', loss_e_val, epoch)
+        writer.add_scalar("loss/train", loss_e, epoch)
+        writer.add_scalar("loss/val", loss_e_val, epoch)
         # acc
-        writer.add_scalar('acc/val', acc_val_all[-1], epoch)
+        writer.add_scalar("acc/val", acc_val_all[-1], epoch)
         # bkg rejection
-        writer.add_scalar('bkg_rejection/val', imtafe, epoch)
+        writer.add_scalar("bkg_rejection/val", imtafe, epoch)
         # hyper params
-        writer.add_scalar('hparams/batch_size', args.batch_size, epoch)
+        writer.add_scalar("hparams/batch_size", args.batch_size, epoch)
 
         # update learning rate scheduler
         scheduler.step()
 
     # Training done
-    writer.add_hparams({'lr': args.learning_rate,
-                        'bsize': args.batch_size,
-                        'cls': args.cls,
-                        'emb_type': options.embedding_layers_type},
-                       {'highest accuracy': acc_val_best,
-                        "highest bkg rej": rej_val_best})
+    writer.add_hparams(
+        {
+            "lr": args.learning_rate,
+            "bsize": args.batch_size,
+            "cls": args.cls,
+            "emb_type": options.embedding_layers_type,
+        },
+        {"highest accuracy": acc_val_best, "highest bkg rej": rej_val_best},
+    )
     print("Training done", flush=True, file=logfile)
 
 
@@ -682,12 +682,12 @@ if __name__ == "__main__":
         help="whether to start from a checkpoint",
     )
     parser.add_argument(
-        "--small",
+        "--percent",
         type=int,
         action="store",
-        dest="small",
-        default=1,
-        help="whether to use a small dataset (10%) for finetuning",
+        dest="percent",
+        default=10,
+        help="percentage of the dataset to use for finetuning",
     )
     parser.add_argument(
         "--learning-rate",
@@ -695,7 +695,7 @@ if __name__ == "__main__":
         action="store",
         dest="learning_rate",
         default=1e-4,
-        help="Maximum learning rate"
+        help="Maximum learning rate",
     )
 
     args = parser.parse_args()
