@@ -57,7 +57,7 @@ def Projector(mlp, embedding):
 def load_data(args, dataset_path, tag=None):
     # data_dir = f"{dataset_path}/{flag}/processed/4_features"
     num_jets = (
-        max(int(1211000 * args.percent / 100), 785767) if args.percent < 100 else None
+        min(int(1211000 * args.percent / 100), 785767) if args.percent < 100 else None
     )
     datset = JetDataset(dataset_path, labels=True, num_jets=num_jets)
     dataloader = DataLoader(datset, batch_size=args.batch_size, shuffle=True)
