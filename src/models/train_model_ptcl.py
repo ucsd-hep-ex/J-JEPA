@@ -14,6 +14,8 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from torch.nn.parallel import DistributedDataParallel
 from torch.cuda.amp import GradScaler, autocast
+from torch.utils.data._utils.collate import default_collate
+from torch.nn.utils.rnn       import pad_sequence
 import torch.distributed as dist
 import time
 import random
@@ -109,8 +111,17 @@ def setup_data_loader(args, options, data_path, world_size, rank, tag="train"):
         num_workers=options.num_workers,
         pin_memory=True,
         sampler=sampler,
+        collate_fn = pad_collate,
     )
     return loader, sampler, len(dataset), stats
+
+def pad_collate(batch):
+    # pads subjet dimension so that each batch is the same length
+    fixed = default_collate([sample[:3] for sample in batch])
+    subjet_list = [sample[3] for sample in batch]  
+    padded_subjets = pad_sequence(subjet_list, batch_first=True, padding_value=0.0)
+    
+    return (*fixed, padded_subjets)
 
 
 def save_checkpoint(model, optimizer, epoch, loss_train, loss_val, output_dir):
