@@ -14,6 +14,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from torch.nn.parallel import DistributedDataParallel
 from torch.cuda.amp import GradScaler, autocast
+from torch.utils.data._utils.collate import default_collate
 import torch.distributed as dist
 import time
 import random
@@ -109,9 +110,16 @@ def setup_data_loader(args, options, data_path, world_size, rank, tag="train"):
         num_workers=options.num_workers,
         pin_memory=True,
         sampler=sampler,
+        collate_fn = collate_fn
     )
     return loader, sampler, len(dataset), stats
 
+def collate_fn(batch):
+    # use default_collate on everything but the last field
+    tensors = default_collate([b[:-1] for b in batch])
+    subjets = [b[-1] for b in batch]
+    
+    return (*tensors, subjets)
 
 def save_checkpoint(model, optimizer, epoch, loss_train, loss_val, output_dir):
     checkpoint = {
@@ -404,7 +412,7 @@ def main(rank, world_size, args):
         )
         model.train()
         # ["p4_spatial (px, py, pz, e)", "p4 (eta, phi, log_pt, log_e)", "mask"]
-        for itr, (p4_spatial, p4, particle_mask) in enumerate(pbar_t):
+        for itr, (p4_spatial, p4, particle_mask, subjets) in enumerate(pbar_t):
 
             # start data loading timer
             start_data_loading = time.time()
@@ -435,6 +443,7 @@ def main(rank, world_size, args):
             while True:
                 context_masks, target_masks = create_random_masks(
                     p4_spatial,
+                    subjets,
                     ratio=options.trgt_ratio,
                     max_targets=options.max_targets,
                 )
@@ -589,7 +598,7 @@ def main(rank, world_size, args):
             desc="Validation",
         )
 
-        for itr, (p4_spatial, p4, particle_mask) in enumerate(pbar_v):
+        for itr, (p4_spatial, p4, particle_mask, subjets) in enumerate(pbar_v):
         
             particle_mask = particle_mask.squeeze(-1).bool()
             p4 = p4.to(dtype=torch.float32)
@@ -602,6 +611,7 @@ def main(rank, world_size, args):
 
             context_masks, target_masks = create_random_masks(
                 p4_spatial,
+                subjets,
                 ratio=options.trgt_ratio,
                 max_targets=options.max_targets,
             )

@@ -6,6 +6,8 @@ import numpy as np
 from collections import namedtuple
 from functools import lru_cache
 
+from src.util.create_random_masks import get_subjets
+
 DataSample = namedtuple("DataSample", ["p4_spatial", "p4", "mask"])
 DataSample_label = namedtuple("DataSample_label", ["p4_spatial", "p4", "mask", "labels"])
 
@@ -27,6 +29,9 @@ class ParticleDataset(Dataset):
     ):
         self.return_labels = return_labels
         self.size_multiplier = size_multiplier
+        
+        # will be used for storing precomputed subjets_info for each jet
+        self.subjets_cache = {}
 
          # sort all hfd5 files in directory, treating each file as a long concatenated dataset of jets
         self.files = sorted(
@@ -163,7 +168,16 @@ class ParticleDataset(Dataset):
             p_spatial = torch.from_numpy(np.stack([px, py, pz, norm_e], axis=-1))
             p4_tensor = torch.from_numpy(np.stack([deta, dphi, ptl, elog], axis=-1))
             p_mask     = torch.from_numpy(mask_np).unsqueeze(1)
+        
+        # compute cached subjets_info (originally from create_random_masks)
+        if idx not in self.subjets_cache:
+            # use numpy for clustering (N_particles, 4)
+            arr = p_spatial.numpy()       
+            px, py, pz, e = arr[:,0], arr[:,1], arr[:,2], arr[:,3]
+            subjets = get_subjets(px, py, pz, e,JET_ALGO="CA", jet_radius=0.2)
+            self.subjets_cache[idx] = subjets
+        subjets_info_sorted = self.subjets_cache[idx]
 
         if self.return_labels:
-            return DataSample_label(p_spatial, p4_tensor, p_mask, labels)
-        return DataSample(p_spatial, p4_tensor, p_mask)
+            return p_spatial, p4_tensor, p_mask, subjets_info_sorted, labels
+        return p_spatial, p4_tensor, p_mask, subjets_info_sorted
