@@ -119,24 +119,30 @@ def setup_data_loader(args, options, data_path, world_size, rank, tag="train"):
 def collate_fn(batch):
     # stack p4_spatial, p4, mask
     fixed = default_collate([ sample[:-2] for sample in batch ])
+    # extract subjects
+    raw_subjets = [ sample[-2] for sample in batch ]
+    subjet_mask  = default_collate([ sample[-1] for sample in batch ])
 
-    # convert subjets into tensors
-    subjets_per_sample = []
-    for raw in (sample[-2] for sample in batch):
-        arr = torch.tensor(
-            [ [sj["features"]["pT"],
-               sj["features"]["eta"],
-               sj["features"]["phi"],
-               sj["features"]["num_ptcls"]] 
-              for sj in raw ],
-            dtype=torch.float32
-        )
-        subjets_per_sample.append(arr)
+    # normalize into a list of tensors
+    subjets_list = []
+    for sj in raw_subjets:
+        if isinstance(sj, torch.Tensor):
+            # already a tensor
+            subjets_list.append(sj)
+        elif isinstance(sj, list) and sj and isinstance(sj[0], dict):
+            # list-of-dicts case: pull out their features
+            arr = torch.tensor([
+                [ d["features"]["pT"],
+                  d["features"]["eta"],
+                  d["features"]["phi"],
+                  d["features"]["num_ptcls"] ]
+                for d in sj
+            ], dtype=torch.float32)
+            subjets_list.append(arr)
+        else:
+            subjets_list.append(torch.as_tensor(sj, dtype=torch.float32))
 
-    # padding (B, N, 4)
-    subjets_padded = pad_sequence(subjets_per_sample, batch_first=True, padding_value=0.0)  
-    lengths = torch.tensor([ x.size(0) for x in subjets_per_sample ], dtype=torch.long)
-    subjet_mask = torch.arange(subjets_padded.size(1))[None, :] < lengths[:, None]
+    subjets_padded = pad_sequence(subjets_list, batch_first=True, padding_value=0.0)
 
     return (*fixed, subjets_padded, subjet_mask)
 
