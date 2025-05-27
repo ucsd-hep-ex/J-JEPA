@@ -11,6 +11,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch import as_tensor
 from torch.utils.data import DataLoader
 from torch.nn.parallel import DistributedDataParallel
 from torch.cuda.amp import GradScaler, autocast
@@ -116,15 +117,18 @@ def setup_data_loader(args, options, data_path, world_size, rank, tag="train"):
     return loader, sampler, len(dataset), stats
 
 def collate_fn(batch):
-    # stack all fields (besides subjets)
-    fixed = default_collate([sample[:-1] for sample in batch])
-    
-    # collect subjets
-    subjets_list = [sample[-1] for sample in batch]
-    subjets_padded = pad_sequence(subjets_list, batch_first=True, padding_value=0.0)
-    
+    # stack fields besides subjet
+    fixed = default_collate([ sample[:-1] for sample in batch ])
+
+    # extract subjets
+    raw_subjets = [ sample[-1] for sample in batch ]
+
+    # convert to FloatTensor
+    subjets_tensors = [ as_tensor(sj, dtype=torch.float32) for sj in raw_subjets ]
+    subjets_padded = pad_sequence(subjets_tensors, batch_first=True, padding_value=0.0)
+
     # mask for real vs padded rows
-    lengths = torch.tensor([s.shape[0] for s in subjets_list], dtype=torch.long)
+    lengths = torch.tensor([ t.shape[0] for t in subjets_tensors ], dtype=torch.long)
     subjet_mask = torch.arange(subjets_padded.size(1))[None, :] < lengths[:, None]
 
     return (*fixed, subjets_padded, subjet_mask)
