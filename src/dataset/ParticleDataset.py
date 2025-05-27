@@ -168,13 +168,18 @@ class ParticleDataset(Dataset):
             p_spatial = torch.from_numpy(np.stack([px, py, pz, norm_e], axis=-1))
             p4_tensor = torch.from_numpy(np.stack([deta, dphi, ptl, elog], axis=-1))
             p_mask     = torch.from_numpy(mask_np).unsqueeze(1)
+            
+        # make absolutely sure the padded rows are 0-vectors
+        p_spatial = p_spatial * p_mask          
+        p4_tensor = p4_tensor * p_mask
         
         # compute cached subjets_info (originally from create_random_masks)
         if idx not in self.subjets_cache:
-            # use numpy for clustering (N_particles, 4)
-            arr = p_spatial.numpy()       
-            px, py, pz, e = arr[:,0], arr[:,1], arr[:,2], arr[:,3]
-            subjets = get_subjets(px, py, pz, e,JET_ALGO="CA", jet_radius=0.2)
+            # keep only real particles for clustering
+            valid = p_mask.squeeze(-1).bool().numpy()     # 1 = real, 0 = pad
+            arr   = p_spatial[valid].numpy()              # N_real × 4
+            px, py, pz, e = arr[:, 0], arr[:, 1], arr[:, 2], arr[:, 3]
+            subjets = get_subjets(px, py, pz, e, JET_ALGO="CA", jet_radius=0.2)
             self.subjets_cache[idx] = subjets
         subjets_info_sorted = self.subjets_cache[idx]
 
