@@ -15,6 +15,7 @@ from torch.utils.data import DataLoader
 from torch.nn.parallel import DistributedDataParallel
 from torch.cuda.amp import GradScaler, autocast
 from torch.utils.data._utils.collate import default_collate
+from torch.nn.utils.rnn import pad_sequence
 import torch.distributed as dist
 import time
 import random
@@ -115,11 +116,18 @@ def setup_data_loader(args, options, data_path, world_size, rank, tag="train"):
     return loader, sampler, len(dataset), stats
 
 def collate_fn(batch):
-    # use default_collate on everything but the last field
-    tensors = default_collate([b[:-1] for b in batch])
-    subjets = [b[-1] for b in batch]
+    # stack all fields (besides subjets)
+    fixed = default_collate([sample[:-1] for sample in batch])
     
-    return (*tensors, subjets)
+    # collect subjets
+    subjets_list = [sample[-1] for sample in batch]
+    subjets_padded = pad_sequence(subjets_list, batch_first=True, padding_value=0.0)
+    
+    # mask for real vs padded rows
+    lengths = torch.tensor([s.shape[0] for s in subjets_list], dtype=torch.long)
+    subjet_mask = torch.arange(subjets_padded.size(1))[None, :] < lengths[:, None]
+
+    return (*fixed, subjets_padded, subjet_mask)
 
 def save_checkpoint(model, optimizer, epoch, loss_train, loss_val, output_dir):
     checkpoint = {
@@ -412,7 +420,7 @@ def main(rank, world_size, args):
         )
         model.train()
         # ["p4_spatial (px, py, pz, e)", "p4 (eta, phi, log_pt, log_e)", "mask"]
-        for itr, (p4_spatial, p4, particle_mask, subjets) in enumerate(pbar_t):
+        for itr, (p4_spatial, p4, particle_mask, subjets, subjet_mask) in enumerate(pbar_t):
 
             # start data loading timer
             start_data_loading = time.time()
@@ -424,6 +432,8 @@ def main(rank, world_size, args):
             particle_mask = particle_mask.to(
                 device, non_blocking=True, dtype=torch.float32
             )
+            subjets = subjets.to(device)
+            subjet_mask  = subjet_mask.to(device)
             
             # move a copy of particle mask to cpu to match context/target masks
             particle_mask_cpu = particle_mask.cpu().bool()
@@ -439,11 +449,20 @@ def main(rank, world_size, args):
                 p4 = p4[valid]
                 particle_mask = particle_mask[valid]
                 particle_mask_cpu = particle_mask_cpu[valid]
+                subjets = subjets[valid]
+                subjet_mask = subjet_mask[valid]
+                
+            # find real subjets using mask
+            lengths = subjet_mask.sum(dim = 1)
+            real_subjets = [
+                subjets[b, :lengths[b]]                     
+                for b in range(subjets.size(0))
+            ]
 
             while True:
                 context_masks, target_masks = create_random_masks(
                     p4_spatial,
-                    subjets,
+                    real_subjets,
                     ratio=options.trgt_ratio,
                     max_targets=options.max_targets,
                 )
@@ -455,9 +474,21 @@ def main(rank, world_size, args):
                 # keep looping until >= 1 real context and >= 1 real target particle for any jet
                 if (real_context_counts > 0).all() and (real_target_counts > 0).all():
                     break
+            
                
             context_masks = context_masks.to(device)
             target_masks = target_masks.to(device)
+
+            context_masks_expanded = context_masks.unsqueeze(-1)  # Shape: [B, N, 1]
+            context_masks_expanded = context_masks_expanded.expand(
+                -1, -1, 4
+            )  # Shape: [B, N, 4]
+
+            target_masks_expanded = target_masks.unsqueeze(-1)  # Shape: [B, N, 1]
+            target_masks_expanded = target_masks_expanded.expand(
+                -1, -1, 4
+            )  # Shape: [B, N, 4]
+
 
             context_masks_expanded = context_masks.unsqueeze(-1)  # Shape: [B, N, 1]
             context_masks_expanded = context_masks_expanded.expand(
@@ -598,7 +629,7 @@ def main(rank, world_size, args):
             desc="Validation",
         )
 
-        for itr, (p4_spatial, p4, particle_mask, subjets) in enumerate(pbar_v):
+        for itr, (p4_spatial, p4, particle_mask, subjets, subjet_mask) in enumerate(pbar_v):
         
             particle_mask = particle_mask.squeeze(-1).bool()
             p4 = p4.to(dtype=torch.float32)
@@ -608,13 +639,51 @@ def main(rank, world_size, args):
             particle_mask = particle_mask.to(
                 device, non_blocking=True, dtype=torch.float32
             )
+            subjets = subjets.to(device)
+            subjet_mask  = subjet_mask.to(device)
+            
+            # move a copy of particle mask to cpu to match context/target masks
+            particle_mask_cpu = particle_mask.cpu().bool()
 
-            context_masks, target_masks = create_random_masks(
-                p4_spatial,
-                subjets,
-                ratio=options.trgt_ratio,
-                max_targets=options.max_targets,
-            )
+            # check how many real particles each jet has
+            total_real_particles = particle_mask_cpu.sum(dim = 1)
+            multi_real = total_real_particles > 1
+
+            # if there is a jet with only one real particle, filter it out of the batch
+            if not multi_real.all():
+                valid = multi_real.nonzero(as_tuple=True)[0]
+                p4_spatial = p4_spatial[valid]
+                p4 = p4[valid]
+                particle_mask = particle_mask[valid]
+                particle_mask_cpu = particle_mask_cpu[valid]
+                subjets = subjets[valid]
+                subjet_mask = subjet_mask[valid]
+                
+            # find real subjets using mask
+            lengths = subjet_mask.sum(dim = 1)
+            real_subjets = [
+                subjets[b, :lengths[b]]                     
+                for b in range(subjets.size(0))
+            ]
+
+
+            while True:
+                context_masks, target_masks = create_random_masks(
+                    p4_spatial,
+                    real_subjets,
+                    ratio=options.trgt_ratio,
+                    max_targets=options.max_targets,
+                )
+                
+                # for each jet, count how many particles are real in both the context/target masks
+                real_context_counts = (context_masks & particle_mask_cpu).sum(dim=1)
+                real_target_counts = (target_masks & particle_mask_cpu).sum(dim=1)
+                
+                # keep looping until >= 1 real context and >= 1 real target particle for any jet
+                if (real_context_counts > 0).all() and (real_target_counts > 0).all():
+                    break
+            
+               
             context_masks = context_masks.to(device)
             target_masks = target_masks.to(device)
 
