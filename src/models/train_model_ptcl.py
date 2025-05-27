@@ -116,34 +116,41 @@ def setup_data_loader(args, options, data_path, world_size, rank, tag="train"):
     )
     return loader, sampler, len(dataset), stats
 
+from torch.utils.data._utils.collate import default_collate
+from torch.nn.utils.rnn          import pad_sequence
+import torch
+
 def collate_fn(batch):
-    # 1) stack everything except the last two fields
-    fixed = default_collate([sample[:-2] for sample in batch])
+    # 1) Use default_collate on everything except the last two fields
+    fixed = default_collate([ sample[:-2] for sample in batch ])
 
-    # 2) pull out the raw per-sample list-of-subjet-dicts
-    raw_subjets = [sample[-2] for sample in batch]
+    # 2) Pull out the raw subjets list-of-dicts
+    raw_subjets = [ sample[-2] for sample in batch ]
 
-    # 3) convert them to [n_subjets,4] FloatTensors
+    # 3) Build a pure-float tensor for each sample: [n_subjets × 4]
     subjets_tensors = []
     for sj_list in raw_subjets:
-        # your conversion: take features pT,eta,phi,num_ptcls
-        arr = torch.tensor([
-            [sj["features"]["pT"],
-             sj["features"]["eta"],
-             sj["features"]["phi"],
-             sj["features"]["num_ptcls"]]
+        features = [
+            [
+                float(sj["features"]["pT"]),
+                float(sj["features"]["eta"]),
+                float(sj["features"]["phi"]),
+                float(sj["features"]["num_ptcls"]),
+            ]
             for sj in sj_list
-        ], dtype=torch.float32)
-        subjets_tensors.append(arr)
+        ]
+        subjets_tensors.append(torch.tensor(features, dtype=torch.float32))
 
-    # 4) pad into a single [B, N_max, 4] tensor
+    # 4) Pad to [B, N_max, 4]
     subjets_padded = pad_sequence(subjets_tensors, batch_first=True, padding_value=0.0)
 
-    # 5) build a mask [B, N_max]
-    lengths = torch.tensor([t.size(0) for t in subjets_tensors], dtype=torch.long)
+    # 5) Create mask [B, N_max]
+    lengths = torch.tensor([ t.size(0) for t in subjets_tensors ], dtype=torch.long)
     subjet_mask = torch.arange(subjets_padded.size(1))[None, :] < lengths[:, None]
 
+    # 6) Return unpacked tuple: all fixed fields + padded subjets + mask
     return (*fixed, subjets_padded, subjet_mask)
+
 
 
 def save_checkpoint(model, optimizer, epoch, loss_train, loss_val, output_dir):
