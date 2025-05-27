@@ -117,32 +117,31 @@ def setup_data_loader(args, options, data_path, world_size, rank, tag="train"):
     return loader, sampler, len(dataset), stats
 
 def collate_fn(batch):
-    # stack p4_spatial, p4, mask
-    fixed = default_collate([ sample[:-2] for sample in batch ])
-    # extract subjects
-    raw_subjets = [ sample[-2] for sample in batch ]
-    subjet_mask  = default_collate([ sample[-1] for sample in batch ])
+    # 1) stack everything except the last two fields
+    fixed = default_collate([sample[:-2] for sample in batch])
 
-    # normalize into a list of tensors
-    subjets_list = []
-    for sj in raw_subjets:
-        if isinstance(sj, torch.Tensor):
-            # already a tensor
-            subjets_list.append(sj)
-        elif isinstance(sj, list) and sj and isinstance(sj[0], dict):
-            # list-of-dicts case: pull out their features
-            arr = torch.tensor([
-                [ d["features"]["pT"],
-                  d["features"]["eta"],
-                  d["features"]["phi"],
-                  d["features"]["num_ptcls"] ]
-                for d in sj
-            ], dtype=torch.float32)
-            subjets_list.append(arr)
-        else:
-            subjets_list.append(torch.as_tensor(sj, dtype=torch.float32))
+    # 2) pull out the raw per-sample list-of-subjet-dicts
+    raw_subjets = [sample[-2] for sample in batch]
 
-    subjets_padded = pad_sequence(subjets_list, batch_first=True, padding_value=0.0)
+    # 3) convert them to [n_subjets,4] FloatTensors
+    subjets_tensors = []
+    for sj_list in raw_subjets:
+        # your conversion: take features pT,eta,phi,num_ptcls
+        arr = torch.tensor([
+            [sj["features"]["pT"],
+             sj["features"]["eta"],
+             sj["features"]["phi"],
+             sj["features"]["num_ptcls"]]
+            for sj in sj_list
+        ], dtype=torch.float32)
+        subjets_tensors.append(arr)
+
+    # 4) pad into a single [B, N_max, 4] tensor
+    subjets_padded = pad_sequence(subjets_tensors, batch_first=True, padding_value=0.0)
+
+    # 5) build a mask [B, N_max]
+    lengths = torch.tensor([t.size(0) for t in subjets_tensors], dtype=torch.long)
+    subjet_mask = torch.arange(subjets_padded.size(1))[None, :] < lengths[:, None]
 
     return (*fixed, subjets_padded, subjet_mask)
 
