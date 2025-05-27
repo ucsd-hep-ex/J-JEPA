@@ -117,21 +117,29 @@ def setup_data_loader(args, options, data_path, world_size, rank, tag="train"):
     return loader, sampler, len(dataset), stats
 
 def collate_fn(batch):
-    # stack fields besides subjet
-    fixed = default_collate([ sample[:-1] for sample in batch ])
+    # stack p4_spatial, p4, mask
+    fixed = default_collate([ sample[:-2] for sample in batch ])
 
-    # extract subjets
-    raw_subjets = [ sample[-1] for sample in batch ]
+    # convert subjets into tensors
+    subjets_per_sample = []
+    for raw in (sample[-2] for sample in batch):
+        arr = torch.tensor(
+            [ [sj["features"]["pT"],
+               sj["features"]["eta"],
+               sj["features"]["phi"],
+               sj["features"]["num_ptcls"]] 
+              for sj in raw ],
+            dtype=torch.float32
+        )
+        subjets_per_sample.append(arr)
 
-    # convert to FloatTensor
-    subjets_tensors = [ as_tensor(sj, dtype=torch.float32) for sj in raw_subjets ]
-    subjets_padded = pad_sequence(subjets_tensors, batch_first=True, padding_value=0.0)
-
-    # mask for real vs padded rows
-    lengths = torch.tensor([ t.shape[0] for t in subjets_tensors ], dtype=torch.long)
+    # padding (B, N, 4)
+    subjets_padded = pad_sequence(subjets_per_sample, batch_first=True, padding_value=0.0)  
+    lengths = torch.tensor([ x.size(0) for x in subjets_per_sample ], dtype=torch.long)
     subjet_mask = torch.arange(subjets_padded.size(1))[None, :] < lengths[:, None]
 
     return (*fixed, subjets_padded, subjet_mask)
+
 
 def save_checkpoint(model, optimizer, epoch, loss_train, loss_val, output_dir):
     checkpoint = {
@@ -436,9 +444,6 @@ def main(rank, world_size, args):
             particle_mask = particle_mask.to(
                 device, non_blocking=True, dtype=torch.float32
             )
-            subjets = subjets.to(device)
-            subjet_mask  = subjet_mask.to(device)
-            
             # move a copy of particle mask to cpu to match context/target masks
             particle_mask_cpu = particle_mask.cpu().bool()
 
@@ -453,15 +458,20 @@ def main(rank, world_size, args):
                 p4 = p4[valid]
                 particle_mask = particle_mask[valid]
                 particle_mask_cpu = particle_mask_cpu[valid]
-                subjets = subjets[valid]
-                subjet_mask = subjet_mask[valid]
+                
+                valid_idx = valid.tolist()
+                subjets = [ subjets[i] for i in valid_idx ]
+                subjet_mask = subjet_mask[valid] 
                 
             # find real subjets using mask
-            lengths = subjet_mask.sum(dim = 1)
-            real_subjets = [
-                subjets[b, :lengths[b]]                     
-                for b in range(subjets.size(0))
-            ]
+            lengths = subjet_mask.sum(dim=1)     
+            real_subjets = []
+            for b, sj in enumerate(subjets):
+                L = lengths[b].item()
+                real_subjets.append(sj[:L])
+                
+            subjets = subjets.to(device, non_blocking=True)
+            subjet_mask = subjet_mask.to(device, non_blocking=True)
 
             while True:
                 context_masks, target_masks = create_random_masks(
@@ -643,8 +653,6 @@ def main(rank, world_size, args):
             particle_mask = particle_mask.to(
                 device, non_blocking=True, dtype=torch.float32
             )
-            subjets = subjets.to(device)
-            subjet_mask  = subjet_mask.to(device)
             
             # move a copy of particle mask to cpu to match context/target masks
             particle_mask_cpu = particle_mask.cpu().bool()
@@ -659,17 +667,21 @@ def main(rank, world_size, args):
                 p4_spatial = p4_spatial[valid]
                 p4 = p4[valid]
                 particle_mask = particle_mask[valid]
-                particle_mask_cpu = particle_mask_cpu[valid]
-                subjets = subjets[valid]
-                subjet_mask = subjet_mask[valid]
+                particle_mask_cpu = particle_mask_cpu[valid]    
+                
+                valid_idx = valid.tolist()
+                subjets = [ subjets[i] for i in valid_idx ]
+                subjet_mask = subjet_mask[valid] 
                 
             # find real subjets using mask
-            lengths = subjet_mask.sum(dim = 1)
-            real_subjets = [
-                subjets[b, :lengths[b]]                     
-                for b in range(subjets.size(0))
-            ]
-
+            lengths = subjet_mask.sum(dim=1)     
+            real_subjets = []
+            for b, sj in enumerate(subjets):
+                L = lengths[b].item()
+                real_subjets.append(sj[:L])
+            
+            subjets = subjets.to(device, non_blocking=True)
+            subjet_mask = subjet_mask.to(device, non_blocking=True)
 
             while True:
                 context_masks, target_masks = create_random_masks(
