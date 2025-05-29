@@ -265,6 +265,7 @@ def main(args):
         optimizer = optim.Adam(
             [{"params": proj.parameters()}, {"params": net.parameters()}],
             lr=args.learning_rate,
+            weight_decay=args.l2,
         )
         net.train()
     else:
@@ -550,6 +551,7 @@ def main(args):
         writer.add_scalar("bkg_rejection/val", imtafe, epoch)
         # hyper params
         writer.add_scalar("hparams/batch_size", args.batch_size, epoch)
+        writer.add_scalar("hparams/l2", args.l2, epoch)
 
         # update learning rate scheduler
         scheduler.step()
@@ -559,6 +561,7 @@ def main(args):
         {
             "lr": args.learning_rate,
             "bsize": args.batch_size,
+            "l2": args.l2,
             "cls": args.cls,
             "emb_type": options.embedding_layers_type,
         },
@@ -696,6 +699,14 @@ if __name__ == "__main__":
         dest="learning_rate",
         default=1e-4,
         help="Maximum learning rate",
+    )
+    parser.add_argument(
+        "--l2",
+        type=float,
+        action="store",
+        dest="l2",
+        default=1e-2,
+        help="L2 regularization passed to the optimizer"
     )
 
     args = parser.parse_args()
