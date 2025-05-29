@@ -35,11 +35,9 @@ np.random.seed(seed)
 random.seed(seed)
 
 torch.autograd.set_detect_anomaly(True)
-
-# memory-efficient scaled dot product
+# built in memory-efficient scaled dot product
 torch.backends.cuda.enable_flash_sdp(True)
 torch.backends.cuda.enable_mem_efficient_sdp(True)
-
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train JJEPA model")
@@ -420,8 +418,10 @@ def main(rank, world_size, args):
             # start data loading timer
             start_data_loading = time.time()
             particle_mask = particle_mask.squeeze(-1).bool()
-            p4_spatial = p4_spatial.to(device, non_blocking=True).half()
-            p4 = p4.to(device, non_blocking=True).half()
+            p4 = p4.to(dtype=torch.float32)
+            p4_spatial = p4_spatial.to(dtype=torch.float32)
+            p4 = p4.to(device, non_blocking=True)
+            p4_spatial = p4_spatial.to(device, non_blocking=True)
             particle_mask = particle_mask.to(
                 device, non_blocking=True, dtype=torch.float32
             )
@@ -602,8 +602,10 @@ def main(rank, world_size, args):
         for itr, (p4_spatial, p4, particle_mask, subjets) in enumerate(pbar_v):
         
             particle_mask = particle_mask.squeeze(-1).bool()
-            p4_spatial = p4_spatial.to(device, non_blocking=True).half()
-            p4 = p4.to(device, non_blocking=True).half()
+            p4 = p4.to(dtype=torch.float32)
+            p4_spatial = p4_spatial.to(dtype=torch.float32)
+            p4 = p4.to(device, non_blocking=True)
+            p4_spatial = p4_spatial.to(device, non_blocking=True)
             particle_mask = particle_mask.to(
                 device, non_blocking=True, dtype=torch.float32
             )
