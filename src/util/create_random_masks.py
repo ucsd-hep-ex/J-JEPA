@@ -203,21 +203,10 @@ def create_random_masks_single(
 
     # If not enough target particles have been selected, select from padded particles to reach max_targets
     if len(selected_indices) < num_targets:
-        num_needed = num_targets - len(selected_indices)
-        padded_indices = list(range(N_non_padded, total_num_particles_padded))
-        num_padded_available = len(padded_indices)
-        num_padded_to_select = min(num_needed, num_padded_available)
-        if num_padded_to_select > 0:
-            additional_padded_indices = torch.tensor(
-                torch.multinomial(
-                    torch.ones(num_padded_available),
-                    num_padded_to_select,
-                    replacement=False,
-                )
-            )
-            selected_indices.extend(
-                padded_indices[i] for i in additional_padded_indices.tolist()
-            )
+        num_needed = num_targets - len(selected_indices) 
+        padded_pool = np.arange(N_non_padded, total_num_particles_padded)
+        extra = np.random.choice(padded_pool, size=num_needed, replace=True) # addresses issue with not being able to draw 1 unique index, which causes a reshape crash
+        selected_indices.extend(extra.tolist())
 
     # Set target_mask for selected indices
     target_mask[selected_indices] = 1.0

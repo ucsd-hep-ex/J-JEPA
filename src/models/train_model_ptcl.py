@@ -413,6 +413,9 @@ def main(rank, world_size, args):
         model.train()
         # ["p4_spatial (px, py, pz, e)", "p4 (eta, phi, log_pt, log_e)", "mask"]
         for itr, (p4_spatial, p4, particle_mask, subjets) in enumerate(pbar_t):
+            
+            if itr <= 2454:
+                continue
 
             # start data loading timer
             start_data_loading = time.time()
