@@ -117,13 +117,14 @@ def get_subjets(px, py, pz, e, JET_ALGO="CA", jet_radius=0.2, return_sorted=True
     return subjets_info_sorted
 
 
-def create_random_masks(p4_spatial, ratio, max_targets, return_sorted=True):
+def create_random_masks(p4_spatial, subjets_info_sorted, ratio, max_targets, return_sorted=True):
     """
     Creates context and target masks for a batch of jets based on the provided ratio and max_targets.
 
     Parameters:
     - p4_spatial: Torch tensor of shape (batch_size, total_num_particles_padded, 4) containing px, py, pz,
         and e (energy) of a batch of jets for input into get_subjets(px, py, pz, e, JET_ALGO="CA", jet_radius=0.2)
+    - subjets_info_sorted: list of length batch_size, each entry is that jet’s precomputed subjets.
     - ratio: Float between 0 and 1, specifying the ratio of target particles to total non-padded particles.
     - max_targets: Integer, maximum number of target particles each jet should have.
 
@@ -142,24 +143,17 @@ def create_random_masks(p4_spatial, ratio, max_targets, return_sorted=True):
     )
 
     for i in tqdm(range(batch_size)):
-        # Extract px, py, pz, e for this jet
-        px = p4_spatial[i, 0, :]  # Shape: (total_num_particles_padded,)
-        py = p4_spatial[i, 1, :]
-        pz = p4_spatial[i, 2, :]
         e = p4_spatial[i, 3, :]
-
         # Get N_non_padded by counting non-zero entries in e
-        N_non_padded = torch.count_nonzero(e)
-
-        # Call get_subjets
-        subjets_info_sorted = get_subjets(
-            px, py, pz, e, JET_ALGO="CA", jet_radius=0.2, return_sorted=return_sorted
-        )
+        N_non_padded = torch.count_nonzero(e).item()
+        
+        # get jet's precomputed subjets
+        jet_subjets = subjets_info_sorted[i]
 
         # Create masks for this jet
         context_mask, target_mask = create_random_masks_single(
-            subjets_info_sorted,
-            N_non_padded.item(),
+            jet_subjets,
+            N_non_padded,
             total_num_particles_padded,
             ratio,
             max_targets,
@@ -209,21 +203,14 @@ def create_random_masks_single(
 
     # If not enough target particles have been selected, select from padded particles to reach max_targets
     if len(selected_indices) < num_targets:
-        num_needed = num_targets - len(selected_indices)
-        padded_indices = list(range(N_non_padded, total_num_particles_padded))
-        num_padded_available = len(padded_indices)
-        num_padded_to_select = min(num_needed, num_padded_available)
-        if num_padded_to_select > 0:
-            additional_padded_indices = torch.tensor(
-                torch.multinomial(
-                    torch.ones(num_padded_available),
-                    num_padded_to_select,
-                    replacement=False,
-                )
-            )
-            selected_indices.extend(
-                padded_indices[i] for i in additional_padded_indices.tolist()
-            )
+        need = num_targets - len(selected_indices)
+
+        # draw unique indices from any slot that hasn't been used yet (padded or real)
+        available = np.setdiff1d(np.arange(total_num_particles_padded),
+                                np.array(selected_indices, dtype=np.int64),
+                                assume_unique=False)
+        extra = np.random.choice(available, size=need, replace=False)
+        selected_indices.extend(extra.tolist())
 
     # Set target_mask for selected indices
     target_mask[selected_indices] = 1.0
