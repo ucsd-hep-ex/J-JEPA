@@ -202,16 +202,13 @@ def create_random_masks_single(
             break
 
     # If not enough target particles have been selected, select from padded particles to reach max_targets
-    # If we still need more, sample from ALL still-unused slots (real + padded)
     if len(selected_indices) < num_targets:
         need = num_targets - len(selected_indices)
 
-        # anything not selected yet is fair game
+        # draw unique indices from any slot that hasn't been used yet (padded or real)
         available = np.setdiff1d(np.arange(total_num_particles_padded),
                                 np.array(selected_indices, dtype=np.int64),
                                 assume_unique=False)
-
-        # we KNOW len(available) ≥ need because total_len (e.g. 128) ≫ max_targets (20)
         extra = np.random.choice(available, size=need, replace=False)
         selected_indices.extend(extra.tolist())
 
