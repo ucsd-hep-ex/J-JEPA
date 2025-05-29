@@ -202,10 +202,17 @@ def create_random_masks_single(
             break
 
     # If not enough target particles have been selected, select from padded particles to reach max_targets
+    # If we still need more, sample from ALL still-unused slots (real + padded)
     if len(selected_indices) < num_targets:
-        num_needed = num_targets - len(selected_indices) 
-        padded_pool = np.arange(N_non_padded, total_num_particles_padded)
-        extra = np.random.choice(padded_pool, size=num_needed, replace=True) # addresses issue with not being able to draw 1 unique index, which causes a reshape crash
+        need = num_targets - len(selected_indices)
+
+        # anything not selected yet is fair game
+        available = np.setdiff1d(np.arange(total_num_particles_padded),
+                                np.array(selected_indices, dtype=np.int64),
+                                assume_unique=False)
+
+        # we KNOW len(available) ≥ need because total_len (e.g. 128) ≫ max_targets (20)
+        extra = np.random.choice(available, size=need, replace=False)
         selected_indices.extend(extra.tolist())
 
     # Set target_mask for selected indices
