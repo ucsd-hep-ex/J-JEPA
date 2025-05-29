@@ -203,21 +203,14 @@ def create_random_masks_single(
 
     # If not enough target particles have been selected, select from padded particles to reach max_targets
     if len(selected_indices) < num_targets:
-        num_needed = num_targets - len(selected_indices)
-        padded_indices = list(range(N_non_padded, total_num_particles_padded))
-        num_padded_available = len(padded_indices)
-        num_padded_to_select = min(num_needed, num_padded_available)
-        if num_padded_to_select > 0:
-            additional_padded_indices = torch.tensor(
-                torch.multinomial(
-                    torch.ones(num_padded_available),
-                    num_padded_to_select,
-                    replacement=False,
-                )
-            )
-            selected_indices.extend(
-                padded_indices[i] for i in additional_padded_indices.tolist()
-            )
+        need = num_targets - len(selected_indices)
+
+        # draw unique indices from any slot that hasn't been used yet (padded or real)
+        available = np.setdiff1d(np.arange(total_num_particles_padded),
+                                np.array(selected_indices, dtype=np.int64),
+                                assume_unique=False)
+        extra = np.random.choice(available, size=need, replace=False)
+        selected_indices.extend(extra.tolist())
 
     # Set target_mask for selected indices
     target_mask[selected_indices] = 1.0
