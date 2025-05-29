@@ -270,7 +270,7 @@ def main(rank, world_size, args):
     logger.info(f"base momentum: {options.base_momentum}")
 
     model = JJEPA(options).to(device)
-    model = torch.compile(model, backend="inductor", mode="max-autotune")
+    model = model.to(dtype=torch.float32)
 
     def check_for_nan(module, input, output):
         # Check inputs
