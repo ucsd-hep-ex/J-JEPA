@@ -460,6 +460,16 @@ def main(rank, world_size, args):
             context_masks = context_masks.to(device)
             target_masks = target_masks.to(device)
 
+            context_masks_expanded = context_masks.unsqueeze(-1)  # Shape: [B, N, 1]
+            context_masks_expanded = context_masks_expanded.expand(
+                -1, -1, 4
+            )  # Shape: [B, N, 4]
+
+            target_masks_expanded = target_masks.unsqueeze(-1)  # Shape: [B, N, 1]
+            target_masks_expanded = target_masks_expanded.expand(
+                -1, -1, 4
+            )  # Shape: [B, N, 4]
+
                         # End Data Loading Timer
             end_data_loading = time.time()
             logger.info(f"Data loading time for batch {itr}: {end_data_loading - start_data_loading:.3f} seconds")
@@ -474,12 +484,12 @@ def main(rank, world_size, args):
 
                 with autocast(enabled=options.use_amp):
                     B = p4_spatial.shape[0]
-                    ctx_idx = context_masks.nonzero(as_tuple=True)   
-                    trg_idx = target_masks.nonzero(as_tuple=True)
-                    p4_context        = p4[ctx_idx].view(B, -1, 4)            
-                    p4_target         = p4[trg_idx].view(B, -1, 4)            
-                    ctxt_particle_mask = particle_mask[ctx_idx].view(B, -1)   
-                    trgt_particle_mask = particle_mask[trg_idx].view(B, -1) 
+                    N_ctxt = context_masks.sum(dim=1).max().item()
+                    N_trgt = target_masks.sum(dim=1).max().item()
+                    p4_context = p4[context_masks_expanded].view(B, N_ctxt, 4)
+                    p4_target = p4[target_masks_expanded].view(B, N_trgt, 4)
+                    ctxt_particle_mask = particle_mask[context_masks].view(B, N_ctxt)
+                    trgt_particle_mask = particle_mask[target_masks].view(B, N_trgt)
 
                     context = {
                         "p4": p4_context,
