@@ -475,7 +475,7 @@ def main(rank, world_size, args):
                 with autocast(enabled=options.use_amp):
                     B = p4_spatial.shape[0]
                     ctx_idx = context_masks.nonzero(as_tuple=True)   
-                    trg_idx = target_masks .nonzero(as_tuple=True)
+                    trg_idx = target_masks.nonzero(as_tuple=True)
                     p4_context        = p4[ctx_idx].view(B, -1, 4)            
                     p4_target         = p4[trg_idx].view(B, -1, 4)            
                     ctxt_particle_mask = particle_mask[ctx_idx].view(B, -1)   
