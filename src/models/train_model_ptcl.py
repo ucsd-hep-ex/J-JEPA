@@ -482,7 +482,6 @@ def main(rank, world_size, args):
                 var_loss = 0
                 optimizer.zero_grad()
                 
-                torch.cuda.synchronize()  
                 t0_unpack = time.time()
 
                 with autocast(enabled=options.use_amp):
@@ -494,7 +493,6 @@ def main(rank, world_size, args):
                     ctxt_particle_mask = particle_mask[context_masks].view(B, N_ctxt)
                     trgt_particle_mask = particle_mask[target_masks].view(B, N_trgt)
                     
-                    torch.cuda.synchronize()
                     t1_unpack = time.time()
                     unpack_time = (t1_unpack - t0_unpack) * 1000  
 
@@ -513,16 +511,13 @@ def main(rank, world_size, args):
                         "p4_spatial": p4_spatial,
                         "particle_mask": particle_mask,
                     }
-                    torch.cuda.synchronize()
                     t0_forward = time.time()
                     pred_repr, target_repr, context_repr = model(
                         context, target, full_jet, train_stats
                     )
-                    torch.cuda.synchronize()
                     t1_forward = time.time()
                     forward_time = (t1_forward - t0_forward) * 1000
                     
-                    torch.cuda.synchronize()
                     t0_loss = time.time()
                     mse_loss = nn.functional.mse_loss(pred_repr, target_repr)
                     loss = mse_loss.clone()
@@ -546,11 +541,9 @@ def main(rank, world_size, args):
                                 / 2
                             )
                             loss += options.var_loss_weight * var_loss
-                    torch.cuda.synchronize()
                     t1_loss = time.time()
                     loss_calc_time = (t1_loss - t0_loss) * 1000 
                     
-                    torch.cuda.synchronize()
                     t0_backward = time.time()
 
                     if options.use_amp:
@@ -570,11 +563,9 @@ def main(rank, world_size, args):
                             )
                         optimizer.step()
                     
-                    torch.cuda.synchronize()
                     t1_backward = time.time()
                     backward_time = (t1_backward - t0_backward) * 1000
 
-                    torch.cuda.synchronize()
                     t0_momentum = time.time()
                     # Step 3. momentum update of target encoder
                     with torch.no_grad():
@@ -584,7 +575,6 @@ def main(rank, world_size, args):
                             model.target_transformer.parameters(),
                         ):
                             param_k.data.mul_(m).add_((1.0 - m) * param_q.detach().data)
-                    torch.cuda.synchronize()
                     t1_momentum = time.time()
                     momentum_time = (t1_momentum - t0_momentum) * 1000 
                 
