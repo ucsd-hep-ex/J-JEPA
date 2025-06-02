@@ -481,6 +481,9 @@ def main(rank, world_size, args):
                 cov_loss = 0
                 var_loss = 0
                 optimizer.zero_grad()
+                
+                torch.cuda.synchronize()  
+                t0_unpack = time.time()
 
                 with autocast(enabled=options.use_amp):
                     B = p4_spatial.shape[0]
@@ -490,6 +493,10 @@ def main(rank, world_size, args):
                     p4_target = p4[target_masks_expanded].view(B, N_trgt, 4)
                     ctxt_particle_mask = particle_mask[context_masks].view(B, N_ctxt)
                     trgt_particle_mask = particle_mask[target_masks].view(B, N_trgt)
+                    
+                    torch.cuda.synchronize()
+                    t1_unpack = time.time()
+                    unpack_time = (t1_unpack - t0_unpack) * 1000  
 
                     context = {
                         "p4": p4_context,
@@ -506,9 +513,17 @@ def main(rank, world_size, args):
                         "p4_spatial": p4_spatial,
                         "particle_mask": particle_mask,
                     }
+                    torch.cuda.synchronize()
+                    t0_forward = time.time()
                     pred_repr, target_repr, context_repr = model(
                         context, target, full_jet, train_stats
                     )
+                    torch.cuda.synchronize()
+                    t1_forward = time.time()
+                    forward_time = (t1_forward - t0_forward) * 1000
+                    
+                    torch.cuda.synchronize()
+                    t0_loss = time.time()
                     mse_loss = nn.functional.mse_loss(pred_repr, target_repr)
                     loss = mse_loss.clone()
                     # apply target and context masks when calculating covariance and variance loss
@@ -531,6 +546,12 @@ def main(rank, world_size, args):
                                 / 2
                             )
                             loss += options.var_loss_weight * var_loss
+                    torch.cuda.synchronize()
+                    t1_loss = time.time()
+                    loss_calc_time = (t1_loss - t0_loss) * 1000 
+                    
+                    torch.cuda.synchronize()
+                    t0_backward = time.time()
 
                     if options.use_amp:
                         scaler.scale(loss).backward()
@@ -548,7 +569,13 @@ def main(rank, world_size, args):
                                 model.parameters(), options.max_grad_norm
                             )
                         optimizer.step()
+                    
+                    torch.cuda.synchronize()
+                    t1_backward = time.time()
+                    backward_time = (t1_backward - t0_backward) * 1000
 
+                    torch.cuda.synchronize()
+                    t0_momentum = time.time()
                     # Step 3. momentum update of target encoder
                     with torch.no_grad():
                         m = next(momentum_scheduler)
@@ -557,7 +584,18 @@ def main(rank, world_size, args):
                             model.target_transformer.parameters(),
                         ):
                             param_k.data.mul_(m).add_((1.0 - m) * param_q.detach().data)
-
+                    torch.cuda.synchronize()
+                    t1_momentum = time.time()
+                    momentum_time = (t1_momentum - t0_momentum) * 1000 
+                
+                logger.info(
+                    f"[{epoch+1}, {itr}] timing breakdown (ms): "
+                    f"unpack={unpack_time:.1f}, "
+                    f"forward={forward_time:.1f}, "
+                    f"loss_calc={loss_calc_time:.1f}, "
+                    f"backward_opt={backward_time:.1f}, "
+                    f"momentum={momentum_time:.1f}, "
+                )
                 loss_dict = {
                     "total_loss": float(loss),
                     "mse_loss": float(mse_loss),
