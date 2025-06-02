@@ -474,12 +474,12 @@ def main(rank, world_size, args):
 
                 with autocast(enabled=options.use_amp):
                     B = p4_spatial.shape[0]
-                    N_ctxt = context_masks.sum(dim=1).max().item()
-                    N_trgt = target_masks.sum(dim=1).max().item()
-                    p4_context = torch.masked_select(p4, context_masks.unsqueeze(-1)).view(B, N_ctxt, 4)        
-                    p4_target  = torch.masked_select(p4, target_masks .unsqueeze(-1)).view(B, N_trgt, 4)       
-                    ctxt_particle_mask = torch.masked_select(particle_mask, context_masks).view(B, N_ctxt)
-                    trgt_particle_mask = torch.masked_select(particle_mask, target_masks ).view(B, N_trgt)
+                    ctx_idx = context_masks.nonzero(as_tuple=True)   
+                    trg_idx = target_masks .nonzero(as_tuple=True)
+                    p4_context        = p4[ctx_idx].view(B, -1, 4)            
+                    p4_target         = p4[trg_idx].view(B, -1, 4)            
+                    ctxt_particle_mask = particle_mask[ctx_idx].view(B, -1)   
+                    trgt_particle_mask = particle_mask[trg_idx].view(B, -1) 
 
                     context = {
                         "p4": p4_context,
