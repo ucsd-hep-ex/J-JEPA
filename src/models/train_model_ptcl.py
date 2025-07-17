@@ -222,6 +222,9 @@ def log_gpu_stats(device):
 
 
 def main(rank, world_size, args):
+    torch.cuda.set_device(rank)
+    if world_size > 1:
+        dist.init_process_group(backend="nccl", init_method="env://")
     out_dir = args.output_dir
     if os.path.isdir(out_dir):
         # List all items in the directory
@@ -238,9 +241,6 @@ def main(rank, world_size, args):
 
     # This will create the directory if it does not exist or if it is empty
     os.makedirs(out_dir, exist_ok=True)
-    if world_size > 1:
-        setup_environment(rank)
-    torch.cuda.set_device(rank)
     device = torch.device(f"cuda:{rank}")
     args.num_val_jets = args.num_jets // 4
 
@@ -789,12 +789,9 @@ def main(rank, world_size, args):
         dist.destroy_process_group()
 
 
+
 if __name__ == "__main__":
     args = parse_args()
-    world_size = min(args.num_gpus, torch.cuda.device_count())
-    if world_size > 1:
-        torch.multiprocessing.spawn(
-            main, args=(world_size, args), nprocs=world_size, join=True
-        )
-    else:
-        main(0, 1, args)
+    local_rank = int(os.environ["LOCAL_RANK"])
+    world_size = int(os.environ["WORLD_SIZE"])
+    main(local_rank, world_size, args)
