@@ -240,7 +240,8 @@ def main(rank, world_size, args):
     os.makedirs(out_dir, exist_ok=True)
     if world_size > 1:
         setup_environment(rank)
-    device = torch.device(f"cuda:{rank}" if torch.cuda.is_available() else "cpu")
+    torch.cuda.set_device(rank)
+    device = torch.device(f"cuda:{rank}")
     args.num_val_jets = args.num_jets // 4
 
     options = Options.load(args.config)
@@ -709,7 +710,7 @@ def main(rank, world_size, args):
                 log_gpu_stats(device)
         model.train()
         scheduler.step()
-        if epoch % options.checkpoint_freq == 0:
+        if rank == 0 and epoch % options.checkpoint_freq == 0:
             save_checkpoint(
                 model,
                 optimizer,
@@ -731,32 +732,36 @@ def main(rank, world_size, args):
             cov_losses_val.append(cov_loss_meter_val.avg)
         if options.var_loss_weight > 0:
             var_losses_val.append(var_loss_meter_val.avg)
-        if loss_meter_val.avg < lowest_val_loss:
-            logger.info(f"new lowest val loss: {loss_meter_val.avg:.3f}")
-            logger.info("Saving best model")
-            lowest_val_loss = loss_meter_val.avg
-            torch.save(
-                model.state_dict(),
-                os.path.join(args.output_dir, "best_model.pth"),
-            )
-        np.save(os.path.join(args.output_dir, "train_losses.npy"), losses_train)
-        np.save(os.path.join(args.output_dir, "val_losses.npy"), losses_val)
-        np.save(os.path.join(args.output_dir, "train_mse_losses.npy"), mse_losses_train)
-        np.save(os.path.join(args.output_dir, "val_mse_losses.npy"), mse_losses_val)
-        if options.cov_loss_weight > 0:
-            np.save(
-                os.path.join(args.output_dir, "train_cov_losses.npy"), cov_losses_train
-            )
-            np.save(os.path.join(args.output_dir, "val_cov_losses.npy"), cov_losses_val)
-        if options.var_loss_weight > 0:
-            np.save(
-                os.path.join(args.output_dir, "train_var_losses.npy"), var_losses_train
-            )
-            np.save(os.path.join(args.output_dir, "val_var_losses.npy"), var_losses_val)
+        if rank == 0:
+            if loss_meter_val.avg < lowest_val_loss:
+                logger.info(f"new lowest val loss: {loss_meter_val.avg:.3f}")
+                logger.info("Saving best model")
+                lowest_val_loss = loss_meter_val.avg
+                torch.save(
+                    model.state_dict(),
+                    os.path.join(args.output_dir, "best_model.pth"),
+                )
+            np.save(os.path.join(args.output_dir, "train_losses.npy"), losses_train)
+            np.save(os.path.join(args.output_dir, "val_losses.npy"), losses_val)
+            np.save(os.path.join(args.output_dir, "train_mse_losses.npy"), mse_losses_train)
+            np.save(os.path.join(args.output_dir, "val_mse_losses.npy"), mse_losses_val)
+            if options.cov_loss_weight > 0:
+                np.save(
+                    os.path.join(args.output_dir, "train_cov_losses.npy"), cov_losses_train
+                )
+                np.save(os.path.join(args.output_dir, "val_cov_losses.npy"), cov_losses_val)
+            if options.var_loss_weight > 0:
+                np.save(
+                    os.path.join(args.output_dir, "train_var_losses.npy"), var_losses_train
+                )
+                np.save(os.path.join(args.output_dir, "val_var_losses.npy"), var_losses_val)
 
         epoch_end_time = time.time()
         logger.info(f"Validation time: {epoch_end_time - train_time_end:.1f} s")
         logger.info(f"Epoch time: {epoch_end_time - epoch_start_time:.1f} s")
+    if world_size > 1:
+        dist.barrier()
+        dist.destroy_process_group()
 
 
 if __name__ == "__main__":
