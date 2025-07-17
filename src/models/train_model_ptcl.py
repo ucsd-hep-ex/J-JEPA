@@ -242,7 +242,8 @@ def main(rank, world_size, args):
     os.makedirs(out_dir, exist_ok=True)
     if world_size > 1:
         setup_environment(rank)
-    device = torch.device(f"cuda:{rank}" if torch.cuda.is_available() else "cpu")
+    torch.cuda.set_device(rank)
+    device = torch.device(f"cuda:{rank}")
     args.num_val_jets = args.num_jets // 4
 
     options = Options.load(args.config)
@@ -482,7 +483,6 @@ def main(rank, world_size, args):
                 var_loss = 0
                 optimizer.zero_grad()
                 
-                t0_unpack = time.time()
 
                 with autocast(enabled=options.use_amp):
                     B = p4_spatial.shape[0]
@@ -493,8 +493,6 @@ def main(rank, world_size, args):
                     ctxt_particle_mask = particle_mask[context_masks].view(B, N_ctxt)
                     trgt_particle_mask = particle_mask[target_masks].view(B, N_trgt)
                     
-                    t1_unpack = time.time()
-                    unpack_time = (t1_unpack - t0_unpack) * 1000  
 
                     context = {
                         "p4": p4_context,
@@ -511,14 +509,11 @@ def main(rank, world_size, args):
                         "p4_spatial": p4_spatial,
                         "particle_mask": particle_mask,
                     }
-                    t0_forward = time.time()
+                    
                     pred_repr, target_repr, context_repr = model(
                         context, target, full_jet, train_stats
                     )
-                    t1_forward = time.time()
-                    forward_time = (t1_forward - t0_forward) * 1000
-                    
-                    t0_loss = time.time()
+    
                     mse_loss = nn.functional.mse_loss(pred_repr, target_repr)
                     loss = mse_loss.clone()
                     # apply target and context masks when calculating covariance and variance loss
@@ -541,10 +536,6 @@ def main(rank, world_size, args):
                                 / 2
                             )
                             loss += options.var_loss_weight * var_loss
-                    t1_loss = time.time()
-                    loss_calc_time = (t1_loss - t0_loss) * 1000 
-                    
-                    t0_backward = time.time()
 
                     if options.use_amp:
                         scaler.scale(loss).backward()
@@ -563,10 +554,6 @@ def main(rank, world_size, args):
                             )
                         optimizer.step()
                     
-                    t1_backward = time.time()
-                    backward_time = (t1_backward - t0_backward) * 1000
-
-                    t0_momentum = time.time()
                     # Step 3. momentum update of target encoder
                     with torch.no_grad():
                         m = next(momentum_scheduler)
@@ -575,8 +562,7 @@ def main(rank, world_size, args):
                             model.target_transformer.parameters(),
                         ):
                             param_k.data.mul_(m).add_((1.0 - m) * param_q.detach().data)
-                    t1_momentum = time.time()
-                    momentum_time = (t1_momentum - t0_momentum) * 1000 
+
                 
                 logger.info(
                     f"[{epoch+1}, {itr}] timing breakdown (ms): "
@@ -739,7 +725,7 @@ def main(rank, world_size, args):
                 log_gpu_stats(device)
         model.train()
         scheduler.step()
-        if epoch % options.checkpoint_freq == 0:
+        if rank == 0 and epoch % options.checkpoint_freq == 0:
             save_checkpoint(
                 model,
                 optimizer,
@@ -761,28 +747,29 @@ def main(rank, world_size, args):
             cov_losses_val.append(cov_loss_meter_val.avg)
         if options.var_loss_weight > 0:
             var_losses_val.append(var_loss_meter_val.avg)
-        if loss_meter_val.avg < lowest_val_loss:
-            logger.info(f"new lowest val loss: {loss_meter_val.avg:.3f}")
-            logger.info("Saving best model")
-            lowest_val_loss = loss_meter_val.avg
-            torch.save(
-                model.state_dict(),
-                os.path.join(args.output_dir, "best_model.pth"),
-            )
-        np.save(os.path.join(args.output_dir, "train_losses.npy"), losses_train)
-        np.save(os.path.join(args.output_dir, "val_losses.npy"), losses_val)
-        np.save(os.path.join(args.output_dir, "train_mse_losses.npy"), mse_losses_train)
-        np.save(os.path.join(args.output_dir, "val_mse_losses.npy"), mse_losses_val)
-        if options.cov_loss_weight > 0:
-            np.save(
-                os.path.join(args.output_dir, "train_cov_losses.npy"), cov_losses_train
-            )
-            np.save(os.path.join(args.output_dir, "val_cov_losses.npy"), cov_losses_val)
-        if options.var_loss_weight > 0:
-            np.save(
-                os.path.join(args.output_dir, "train_var_losses.npy"), var_losses_train
-            )
-            np.save(os.path.join(args.output_dir, "val_var_losses.npy"), var_losses_val)
+        if rank == 0:
+            if loss_meter_val.avg < lowest_val_loss:
+                logger.info(f"new lowest val loss: {loss_meter_val.avg:.3f}")
+                logger.info("Saving best model")
+                lowest_val_loss = loss_meter_val.avg
+                torch.save(
+                    model.state_dict(),
+                    os.path.join(args.output_dir, "best_model.pth"),
+                )
+            np.save(os.path.join(args.output_dir, "train_losses.npy"), losses_train)
+            np.save(os.path.join(args.output_dir, "val_losses.npy"), losses_val)
+            np.save(os.path.join(args.output_dir, "train_mse_losses.npy"), mse_losses_train)
+            np.save(os.path.join(args.output_dir, "val_mse_losses.npy"), mse_losses_val)
+            if options.cov_loss_weight > 0:
+                np.save(
+                    os.path.join(args.output_dir, "train_cov_losses.npy"), cov_losses_train
+                )
+                np.save(os.path.join(args.output_dir, "val_cov_losses.npy"), cov_losses_val)
+            if options.var_loss_weight > 0:
+                np.save(
+                    os.path.join(args.output_dir, "train_var_losses.npy"), var_losses_train
+                )
+                np.save(os.path.join(args.output_dir, "val_var_losses.npy"), var_losses_val)
 
         epoch_end_time = time.time()
         logger.info(f"Validation time: {epoch_end_time - train_time_end:.1f} s")
