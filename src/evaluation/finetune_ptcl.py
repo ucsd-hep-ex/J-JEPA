@@ -55,21 +55,17 @@ def Projector(mlp, embedding):
     return nn.Sequential(*layers)
 
 
-# load data
 def load_data(args, dataset_path, split):
     if split == "val":
         dataset_path = dataset_path.replace("train", "val")
-        dataset = ParticleDataset(dataset_path, num_jets=getattr(args, "num_val_jets", None))
-    else:
-        dataset = ParticleDataset(dataset_path, num_jets=getattr(args, "num_jets", None))
-
+    dataset = TopDatasetPtcl(dataset_path, num_jets=getattr(args, "num_val_jets" if split=="val" else "num_jets", None))
     loader = DataLoader(
         dataset,
         batch_size=args.batch_size,
         shuffle=(split == "train"),
         num_workers=getattr(args, "num_workers", 0),
         pin_memory=True,
-        collate_fn=collate_fn,             
+        collate_fn=None,  
         persistent_workers=getattr(args, "num_workers", 0) > 0,
     )
     return loader, dataset.stats
