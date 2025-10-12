@@ -35,6 +35,8 @@ from src.options import Options
 from src.dataset.ParticleDataset import ParticleDataset
 from src.evaluation.ClassificationHead import ClassificationHead
 
+from torch.utils.data._utils.collate import default_collate
+
 
 # set the number of threads that pytorch will use
 torch.set_num_threads(2)
@@ -54,15 +56,24 @@ def Projector(mlp, embedding):
 
 
 # load data
-def load_data(args, dataset_path, tag=None):
-    # data_dir = f"{dataset_path}/{flag}/processed/4_features"
-    num_jets = None
-    if args.small:
-        num_jets = 100 * 1000
-    dataset = ParticleDataset(dataset_path, return_labels=True, num_jets=num_jets)
-    stats = dataset.stats
-    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
-    return dataloader, stats
+def load_data(args, dataset_path, split):
+    # build dataset
+    if split == "val":
+        dataset_path = dataset_path.replace("train", "val")
+        dataset = ParticleDataset(dataset_path, num_jets=getattr(args, "num_val_jets", None))
+    else:
+        dataset = ParticleDataset(dataset_path, num_jets=getattr(args, "num_jets", None))
+
+    loader = DataLoader(
+        dataset,
+        batch_size=args.batch_size,
+        shuffle=(split == "train"),
+        num_workers=getattr(args, "num_workers", 0),
+        pin_memory=True,
+        collate_fn=collate_fn,                 
+        persistent_workers=getattr(args, "num_workers", 0) > 0,
+    )
+    return loader, dataset.stats
 
 
 def load_model(logfile, options, model_path=None, device="cpu"):
@@ -82,6 +93,11 @@ def find_nearest(array, value):
     array = np.asarray(array)
     idx = (np.abs(array - value)).argmin()
     return array[idx]
+
+def collate_fn(batch):
+    tensors = default_collate([b[:-1] for b in batch])
+    subjets = [b[-1] for b in batch]
+    return (*tensors, subjets)
 
 
 # def get_perf_stats(labels, measures):
