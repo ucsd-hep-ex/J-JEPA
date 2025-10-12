@@ -58,14 +58,17 @@ def Projector(mlp, embedding):
 def load_data(args, dataset_path, split):
     if split == "val":
         dataset_path = dataset_path.replace("train", "val")
-    dataset = TopDatasetPtcl(dataset_path, num_jets=getattr(args, "num_val_jets" if split=="val" else "num_jets", None))
+        dataset = ParticleDataset(dataset_path, num_jets=getattr(args, "num_val_jets", None))
+    else:
+        dataset = ParticleDataset(dataset_path, num_jets=getattr(args, "num_jets", None))
+
     loader = DataLoader(
         dataset,
         batch_size=args.batch_size,
         shuffle=(split == "train"),
         num_workers=getattr(args, "num_workers", 0),
         pin_memory=True,
-        collate_fn=None,  
+        collate_fn=collate_fn,
         persistent_workers=getattr(args, "num_workers", 0) > 0,
     )
     return loader, dataset.stats
@@ -90,23 +93,24 @@ def find_nearest(array, value):
     return array[idx]
 
 def collate_fn(batch):
-    p4_spatial_list = [b[0] for b in batch]
-    p4_list         = [b[1] for b in batch]
-    pmask_list      = [b[2] for b in batch]
-    last_list       = [b[3] for b in batch]
+    tensors = default_collate([b[:-1] for b in batch])
+    last    = [b[-1] for b in batch]
 
-    p4_spatial    = default_collate(p4_spatial_list)
-    p4            = default_collate(p4_list)
-    particle_mask = default_collate(pmask_list)
+    if isinstance(last[0], (int, np.integer)) or (torch.is_tensor(last[0]) and last[0].ndim == 0):
+        labels = torch.as_tensor(last, dtype=torch.long)
+        return (*tensors, labels)
+        
+    if isinstance(last[0], dict):
+        if "label" in last[0]:
+            labels = torch.tensor([int(x["label"]) for x in last], dtype=torch.long)
+            return (*tensors, labels)
+        if "y" in last[0]:
+            labels = torch.tensor([int(x["y"]) for x in last], dtype=torch.long)
+            return (*tensors, labels)
 
-    if isinstance(last_list[0], (int, np.integer)) or (torch.is_tensor(last_list[0]) and last_list[0].ndim == 0):
-        labels = torch.as_tensor(last_list, dtype=torch.long)
-        return p4_spatial, p4, particle_mask, labels
-
-    if isinstance(last_list[0], dict) and ("label" in last_list[0]):
-        labels = torch.as_tensor([d["label"] for d in last_list], dtype=torch.long)
-        return p4_spatial, p4, particle_mask, labels
-    return p4_spatial, p4, particle_mask, last_list
+    raise ValueError(
+        f"got type {type(last[0])}. "
+    )
 
 
 
