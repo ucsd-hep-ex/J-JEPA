@@ -156,11 +156,24 @@ logger = logging.getLogger(__name__)
 
 def setup_logging(rank, output_dir):
     log_file = Path(output_dir) / f"train_rank_{rank}.log"
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(levelname)s - %(message)s",
-        handlers=[logging.FileHandler(log_file), logging.StreamHandler()],
-    )
+
+    global logger
+    logger.setLevel(logging.INFO)
+
+    for h in list(logger.handlers):
+        logger.removeHandler(h)
+
+    fh = logging.FileHandler(log_file)
+    fh.setLevel(logging.INFO)
+    fh.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+    logger.addHandler(fh)
+
+    # console only on rank 0
+    if rank == 0:
+        sh = logging.StreamHandler()
+        sh.setLevel(logging.INFO)
+        sh.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+        logger.addHandler(sh)
 
 
 class AverageMeter(object):
@@ -245,7 +258,7 @@ def main(rank, world_size, args):
 
     options = Options.load(args.config)
     options.batch_size = args.batch_size
-    options.num_steps_per_epoch = args.num_jets // options.batch_size
+    options.num_steps_per_epoch = math.ceil(args.num_jets / (args.batch_size * world_size)) # match DDP for EMA updates
     options.cov_loss_weight = args.cov_loss_weight
     options.var_loss_weight = args.var_loss_weight
     options.base_momentum = args.base_momentum
@@ -513,13 +526,13 @@ def main(rank, world_size, args):
                 var_loss_meter_train.update(loss_dict["var_loss"])
             time_meter_train.update(etime)
 
-            if itr % options.log_freq == 0:
+            if rank == 0 and itr % options.log_freq == 0:
                 logger.info(f"[{epoch + 1}, {itr}] total training loss: {loss_meter_train.avg:.3f}, ({time_meter_train.avg:.1f} ms)")
                 logger.info(f"mse loss: {mse_loss_meter_train.avg:+.3f}, cov loss: {cov_loss_meter_train.avg:+.3f}, var loss: {var_loss_meter_train.avg:+.3f}")
                 log_gpu_stats(device)
 
         train_time_end = time.time()
-        logger.info(f"Training time: {train_time_end - epoch_start_time:.1f} s")
+        
 
         steps_val = math.ceil(val_dataset_size / (options.batch_size * world_size))
         pbar_v = tqdm(
@@ -612,7 +625,7 @@ def main(rank, world_size, args):
                 var_loss_meter_val.update(val_loss_dict["var_loss"])
             time_meter_val.update(etime)
 
-            if itr % options.log_freq == 0:
+            if rank == 0 and itr % options.log_freq == 0:
                 logger.info(f"[{epoch + 1}, {itr}] total validation loss: {loss_meter_val.avg:.3f}, ({time_meter_val.avg:.1f} ms)")
                 logger.info(f"mse loss: {mse_loss_meter_val.avg:+.3f}, cov loss: {cov_loss_meter_val.avg:+.3f}, var loss: {var_loss_meter_val.avg:+.3f}")
                 log_gpu_stats(device)
@@ -664,8 +677,10 @@ def main(rank, world_size, args):
                 np.save(os.path.join(args.output_dir, "val_var_losses.npy"), var_losses_val)
 
         epoch_end_time = time.time()
-        logger.info(f"Validation time: {epoch_end_time - train_time_end:.1f} s")
-        logger.info(f"Epoch time:      {epoch_end_time - epoch_start_time:.1f} s")
+        if rank == 0:
+            logger.info(f"Training time: {train_time_end - epoch_start_time:.1f} s")
+            logger.info(f"Validation time: {epoch_end_time - train_time_end:.1f} s")
+            logger.info(f"Epoch time:      {epoch_end_time - epoch_start_time:.1f} s")
 
     if world_size > 1:
         dist.barrier()
