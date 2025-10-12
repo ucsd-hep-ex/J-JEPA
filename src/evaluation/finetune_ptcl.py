@@ -99,22 +99,17 @@ def collate_fn(batch):
     pmask_list      = [b[2] for b in batch]
     last_list       = [b[3] for b in batch]
 
-    p4_spatial  = default_collate(p4_spatial_list)
-    p4          = default_collate(p4_list)
+    p4_spatial    = default_collate(p4_spatial_list)
+    p4            = default_collate(p4_list)
     particle_mask = default_collate(pmask_list)
 
-    is_scalar_label = (
-        isinstance(last_list[0], (int, np.integer)) or
-        (torch.is_tensor(last_list[0]) and last_list[0].ndim == 0)
-    )
-    if is_scalar_label:
+    if isinstance(last_list[0], (int, np.integer)) or (torch.is_tensor(last_list[0]) and last_list[0].ndim == 0):
         labels = torch.as_tensor(last_list, dtype=torch.long)
         return p4_spatial, p4, particle_mask, labels
 
     if isinstance(last_list[0], dict) and ("label" in last_list[0]):
         labels = torch.as_tensor([d["label"] for d in last_list], dtype=torch.long)
         return p4_spatial, p4, particle_mask, labels
-        
     return p4_spatial, p4, particle_mask, last_list
 
 
