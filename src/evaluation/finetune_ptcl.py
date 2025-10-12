@@ -57,7 +57,6 @@ def Projector(mlp, embedding):
 
 # load data
 def load_data(args, dataset_path, split):
-    # build dataset
     if split == "val":
         dataset_path = dataset_path.replace("train", "val")
         dataset = ParticleDataset(dataset_path, num_jets=getattr(args, "num_val_jets", None))
@@ -70,7 +69,7 @@ def load_data(args, dataset_path, split):
         shuffle=(split == "train"),
         num_workers=getattr(args, "num_workers", 0),
         pin_memory=True,
-        collate_fn=collate_fn,                 
+        collate_fn=collate_fn,             
         persistent_workers=getattr(args, "num_workers", 0) > 0,
     )
     return loader, dataset.stats
@@ -96,8 +95,17 @@ def find_nearest(array, value):
 
 def collate_fn(batch):
     tensors = default_collate([b[:-1] for b in batch])
-    subjets = [b[-1] for b in batch]
-    return (*tensors, subjets)
+    last    = [b[-1] for b in batch]
+    is_label = (
+        isinstance(last[0], (int, np.integer)) or
+        (torch.is_tensor(last[0]) and last[0].ndim == 0)
+    )
+    if is_label:
+        labels = torch.as_tensor(last, dtype=torch.long)
+        return (*tensors, labels)
+
+    return (*tensors, last)
+
 
 
 # def get_perf_stats(labels, measures):
@@ -338,6 +346,10 @@ def main(args):
         proj.train()
         pbar = tqdm(train_dataloader)
         for i, (p4_spatial, p4, particle_mask, labels) in enumerate(pbar):
+            if isinstance(labels, list):
+                labels = torch.tensor(labels, dtype=torch.long, device=args.device)
+            elif torch.is_tensor(labels):
+                labels = labels.to(args.device, dtype=torch.long)
             optimizer.zero_grad()
 
             y = labels.to(args.device)
@@ -383,6 +395,10 @@ def main(args):
             proj.eval()
             pbar = tqdm(val_dataloader)
             for i, (p4_spatial, p4, particle_mask, labels) in enumerate(pbar):
+                if isinstance(labels, list):
+                    labels = torch.tensor(labels, dtype=torch.long, device=args.device)
+                elif torch.is_tensor(labels):
+                    labels = labels.to(args.device, dtype=torch.long)
                 y = labels.to(args.device)
                 particle_mask = particle_mask.squeeze(-1).bool()
                 p4 = p4.to(dtype=torch.float32)
