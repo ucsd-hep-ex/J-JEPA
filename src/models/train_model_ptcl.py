@@ -101,9 +101,9 @@ def setup_environment(rank):
 def setup_data_loader(args, options, data_path, world_size, rank, tag="train"):
     if tag == "val":
         data_path = data_path.replace("train", "val")
-        dataset = ParticleDataset(data_path, num_jets=options.num_val_jets)
+        dataset = ParticleDataset(data_path, num_jets=options.num_val_jets, compute_subjets = True)
     else:
-        dataset = ParticleDataset(data_path, num_jets=options.num_jets)
+        dataset = ParticleDataset(data_path, num_jets=options.num_jets, compute_subjets = True)
 
     sampler = None
     if world_size > 1:
