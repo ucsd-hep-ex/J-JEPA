@@ -61,7 +61,7 @@ def load_data(args, dataset_path, tag=None):
     num_jets = None
     if args.small:
         num_jets = 100 * 1000
-    dataset = ParticleDataset(dataset_path, return_labels=True, num_jets=num_jets)
+    dataset = ParticleDataset(dataset_path, return_labels=True, num_jets=num_jets, compute_subjets = False)
     stats = dataset.stats
     dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn = collate_drop_subjets, shuffle=True)
     return dataloader, stats
