@@ -117,8 +117,8 @@ def setup_data_loader(args, options, data_path, world_size, rank, tag="train"):
     loader = DataLoader(
         dataset,
         batch_size=options.batch_size,
-        shuffle=shuffle,
-        num_workers=options.num_workers,
+        shuffle=False,
+        num_workers=4,
         pin_memory=True,
         sampler=sampler,
         collate_fn=collate_fn,
