@@ -108,7 +108,7 @@ def setup_data_loader(args, options, data_path, world_size, rank, tag="train"):
     sampler = None
     if world_size > 1:
         sampler = torch.utils.data.distributed.DistributedSampler(
-            dataset, num_replicas=world_size, rank=rank, shuffle=(tag == "train"), drop_last=(tag == "train")
+            dataset, num_replicas=world_size, rank=rank, shuffle=False, drop_last=(tag == "train")
         )
 
     stats = dataset.stats
