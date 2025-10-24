@@ -17,7 +17,7 @@ from torch.cuda.amp import GradScaler, autocast
 from torch.utils.data._utils.collate import default_collate
 import torch.distributed as dist
 import time
-import randomR
+import random
 
 import torch.cuda as cuda
 
