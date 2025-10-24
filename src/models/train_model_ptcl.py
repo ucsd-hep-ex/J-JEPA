@@ -17,7 +17,7 @@ from torch.cuda.amp import GradScaler, autocast
 from torch.utils.data._utils.collate import default_collate
 import torch.distributed as dist
 import time
-import random
+import randomR
 
 import torch.cuda as cuda
 
@@ -118,7 +118,7 @@ def setup_data_loader(args, options, data_path, world_size, rank, tag="train"):
         dataset,
         batch_size=options.batch_size,
         shuffle=False,
-        num_workers=2,
+        num_workers=0,
         pin_memory=True,
         sampler=sampler,
         collate_fn=collate_fn,
