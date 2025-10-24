@@ -24,7 +24,7 @@ class ParticleDataset(Dataset):
         directory_path,
         num_jets=None,
         return_labels=False,
-        cache_size_gb=64.0,
+        cache_size_gb=4.0,
         size_multiplier=1.0,
         compute_subjets=False
     ):
