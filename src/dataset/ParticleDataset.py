@@ -26,9 +26,11 @@ class ParticleDataset(Dataset):
         return_labels=False,
         cache_size_gb=64.0,
         size_multiplier=1.0,
+        compute_subjets=False
     ):
         self.return_labels = return_labels
         self.size_multiplier = size_multiplier
+        self.compute_subjets = compute_subjets
         
         # will be used for storing precomputed subjets_info for each jet
         self.subjets_cache = {}
@@ -172,16 +174,19 @@ class ParticleDataset(Dataset):
         # make absolutely sure the padded rows are 0-vectors
         p_spatial = p_spatial * p_mask          
         p4_tensor = p4_tensor * p_mask
+
+        subjets_info_sorted = None
+        if self.compute_subjets:
+            # compute cached subjets_info (originally from create_random_masks)
+            if idx not in self.subjets_cache:
+                # keep only real particles for clustering
+                valid = p_mask.squeeze(-1).bool().numpy()     # 1 = real, 0 = pad
+                arr   = p_spatial[valid].numpy()              # N_real × 4
+                px, py, pz, e = arr[:, 0], arr[:, 1], arr[:, 2], arr[:, 3]
+                subjets = get_subjets(px, py, pz, e, JET_ALGO="CA", jet_radius=0.2)
+                self.subjets_cache[idx] = subjets
+            subjets_info_sorted = self.subjets_cache[idx]
         
-        # compute cached subjets_info (originally from create_random_masks)
-        if idx not in self.subjets_cache:
-            # keep only real particles for clustering
-            valid = p_mask.squeeze(-1).bool().numpy()     # 1 = real, 0 = pad
-            arr   = p_spatial[valid].numpy()              # N_real × 4
-            px, py, pz, e = arr[:, 0], arr[:, 1], arr[:, 2], arr[:, 3]
-            subjets = get_subjets(px, py, pz, e, JET_ALGO="CA", jet_radius=0.2)
-            self.subjets_cache[idx] = subjets
-        subjets_info_sorted = self.subjets_cache[idx]
 
         if self.return_labels:
             return p_spatial, p4_tensor, p_mask, subjets_info_sorted, labels

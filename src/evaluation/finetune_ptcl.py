@@ -35,6 +35,8 @@ from src.options import Options
 from src.dataset.ParticleDataset import ParticleDataset
 from src.evaluation.ClassificationHead import ClassificationHead
 
+from torch.utils.data._utils.collate import default_collate
+
 
 # set the number of threads that pytorch will use
 torch.set_num_threads(2)
@@ -59,9 +61,9 @@ def load_data(args, dataset_path, tag=None):
     num_jets = None
     if args.small:
         num_jets = 100 * 1000
-    dataset = ParticleDataset(dataset_path, return_labels=True, num_jets=num_jets)
+    dataset = ParticleDataset(dataset_path, return_labels=True, num_jets=num_jets, compute_subjets = False)
     stats = dataset.stats
-    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
+    dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn = collate_drop_subjets, shuffle=True)
     return dataloader, stats
 
 
@@ -98,6 +100,10 @@ def find_nearest(array, value):
 #         imtafe = 1
 #     return auc, imtafe
 
+def collate_drop_subjets(batch):
+    if isinstance(batch[0], (tuple, list)) and len(batch[0]) == 5:
+        batch = [(b[0], b[1], b[2], b[4]) for b in batch]
+    return default_collate(batch)
 
 def get_perf_stats(labels, measures):
     measures = np.nan_to_num(measures)  # Replace NaNs with 0
