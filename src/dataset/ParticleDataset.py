@@ -6,7 +6,7 @@ import numpy as np
 from collections import namedtuple
 from functools import lru_cache
 
-#from src.util.create_random_masks import get_subjets
+from src.util.create_random_masks import get_subjets
 
 DataSample = namedtuple("DataSample", ["p4_spatial", "p4", "mask"])
 DataSample_label = namedtuple("DataSample_label", ["p4_spatial", "p4", "mask", "labels"])
@@ -24,7 +24,7 @@ class ParticleDataset(Dataset):
         directory_path,
         num_jets=None,
         return_labels=False,
-        cache_size_gb=4.0,
+        cache_size_gb=0.0,
         size_multiplier=1.0,
         compute_subjets=False
     ):
