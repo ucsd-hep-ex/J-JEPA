@@ -56,11 +56,16 @@ def Projector(mlp, embedding):
 
 
 # load data
-def load_data(args, dataset_path, tag=None):
+def load_data(args, dataset_path, tag=None, max_jets = None):
     # data_dir = f"{dataset_path}/{flag}/processed/4_features"
     num_jets = None
-    if args.small:
-        num_jets = 100 * 1000
+    if tag == 'train':
+        if max_jets is not None and max_jets > 0:
+            num_jets = max_jets
+        else:
+            num_jets = None
+    else:
+        num_jets = 100_000
     dataset = ParticleDataset(dataset_path, return_labels=True, num_jets=num_jets, compute_subjets = False)
     stats = dataset.stats
     dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn = collate_drop_subjets, shuffle=True)
@@ -222,32 +227,20 @@ def main(args):
     print(f"finetune: {args.finetune}", file=logfile, flush=True)
 
     print("loading data")
-    train_dataloader, train_stats = load_data(args, args.train_dataset_path, "train")
-    val_dataloader, val_stats = load_data(args, args.val_dataset_path, "val")
-    if args.small:
-        print("using small dataset for finetuning", file=logfile, flush=True)
-        print(
-            f"number of jets for training: {len(train_dataloader.dataset):e}",
-            file=logfile,
-            flush=True,
-        )
-        print(
-            f"number of jets for validation: {len(val_dataloader.dataset):e}",
-            file=logfile,
-            flush=True,
-        )
-    else:
+    train_dataloader, train_stats = load_data(args, args.train_dataset_path, "train", max_jets = args.num_samples)
+    val_dataloader, val_stats = load_data(args, args.val_dataset_path, "val", max_jets = 100_000)
+    if args.num_samples == 1_000_000:
         print("using full dataset for finetuning", file=logfile, flush=True)
-        print(
+    else:
+        print(f"using {(args.num_samples / 1_000_000) * 100.0 }% dataset for finetuning", file=logfile, flush=True)
+    print(
             f"number of jets for training: {len(train_dataloader.dataset):e}",
             file=logfile,
-            flush=True,
-        )
-        print(
+            flush=True,)
+    print(
             f"number of jets for validation: {len(val_dataloader.dataset):e}",
             file=logfile,
-            flush=True,
-        )
+            flush=True,)
 
     t1 = time.time()
 
@@ -636,12 +629,12 @@ if __name__ == "__main__":
         help="whether to start from a checkpoint",
     )
     parser.add_argument(
-        "--small",
+        "--num-samples",
         type=int,
         action="store",
-        dest="small",
-        default=0,
-        help="whether to use a small dataset (10%) for finetuning",
+        dest="num_samples",
+        default=1_000_000,
+        help="number of jets for training",
     )
 
     args = parser.parse_args()
