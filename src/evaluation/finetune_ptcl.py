@@ -62,8 +62,6 @@ def load_data(args, dataset_path, tag=None, max_jets = None):
     if tag == 'train':
         if max_jets is not None and max_jets > 0:
             num_jets = max_jets
-        else:
-            num_jets = None
     else:
         num_jets = 100_000
     dataset = ParticleDataset(dataset_path, return_labels=True, num_jets=num_jets, compute_subjets = False)
