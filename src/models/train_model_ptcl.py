@@ -363,10 +363,7 @@ def main(rank, world_size, args):
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=options.num_epochs)
     scaler = GradScaler()
 
-    if args.num_jets >= 100_000_000:
-        momentum_scheduler = itertools.repeat(options.base_momentum)
-    else:
-        momentum_scheduler = create_momentum_scheduler(options)
+    momentum_scheduler = create_momentum_scheduler(options)
 
     train_loader, train_sampler, train_dataset_size, train_stats = setup_data_loader(
         args, options, args.data_path, world_size, rank, tag="train"
