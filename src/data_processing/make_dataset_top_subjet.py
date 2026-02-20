@@ -388,14 +388,12 @@ if __name__ == "__main__":
         "--n-subjets",
         type=int,
         action="store",
-        default=20,
         help="number of subjets per jet",
     )
     parser.add_argument(
         "--n-ptcls-per-subjet",
         type=int,
         action="store",
-        default=30,
         help="number of particles per subjet",
     )
 

@@ -108,18 +108,6 @@ class JetDataset(Dataset):
             for name in self.subjets.keys():
                 print(f"shape of {name}: {self.subjets[name].shape}")
 
-        # Normalize pT and Energy
-        # - [part_pt_log, 1.7, 0.7]
-        # - [part_e_log, 2.0, 0.7]
-        for key in ["part_e_log", "part_pt_log"]:
-            data = self.particles[key]
-            mean = 1.7 if key == "part_pt_log" else 2.0
-            std = 0.7
-            # Create a mask for non-zero entries
-            mask = data != 0
-            # Only normalize non-zero entries
-            self.particles[key] = np.where(mask, (data - mean) / std, data)
-
         self.filter_good_jets()
 
         if num_jets is not None:

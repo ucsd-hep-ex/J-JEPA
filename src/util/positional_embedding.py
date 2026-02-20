@@ -34,7 +34,7 @@ def create_space_pos_emb_fn(emb_dim):
     def calc_pos_emb(subjet_ftrs):
         """
         Input:
-            subjets_ftrs: torch tensor of shape (bs, N_subjets, N_sj_ftrs)
+            subjets_ftrs: torch tensor of shape (bs, N_ptcls, 4)
                 last dimension: [pt, eta, phi, E]
         """
         sj_eta = subjet_ftrs[:, :, 1]
@@ -56,6 +56,7 @@ def create_space_pos_emb_fn(emb_dim):
         return emb
 
     return calc_pos_emb
+
 
 def create_phase_space_pos_emb_fn(emb_dim):
     """

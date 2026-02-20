@@ -17,6 +17,7 @@ import gc
 from pathlib import Path
 import math
 from tqdm import tqdm
+import filelock  # Add this import at the top
 
 # load torch modules
 import torch
@@ -31,7 +32,8 @@ from sklearn import metrics
 
 from src.models.jjepa import JJEPA
 from src.options import Options
-from src.dataset.JetDataset import JetDataset
+from src.dataset.ParticleDataset import ParticleDataset
+from src.evaluation.ClassificationHead import ClassificationHead
 
 
 # set the number of threads that pytorch will use
@@ -52,19 +54,27 @@ def Projector(mlp, embedding):
 
 
 # load data
-def load_data(dataset_path, tag=None):
+def load_data(args, dataset_path, tag=None):
     # data_dir = f"{dataset_path}/{flag}/processed/4_features"
-    num_jets = 100 * 1000
-    datset = JetDataset(dataset_path, labels=True, num_jets=num_jets)
-    dataloader = DataLoader(datset, batch_size=args.batch_size, shuffle=True)
-    return dataloader
+    num_jets = None
+    if args.small:
+        num_jets = 100 * 1000
+    dataset = ParticleDataset(dataset_path, return_labels=True, num_jets=num_jets)
+    stats = dataset.stats
+    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
+    return dataloader, stats
 
 
 def load_model(logfile, options, model_path=None, device="cpu"):
     model = JJEPA(options).to(device)
+    print(model, file=logfile, flush=True)
     if model_path:
         model.load_state_dict(torch.load(model_path, map_location=device))
-    print(model, file=logfile, flush=True)
+        print(f"Loaded model from {model_path}", file=logfile, flush=True)
+    else:
+        print("No model path provided, training from scratch", file=logfile, flush=True)
+    if not args.from_checkpoint:
+        print(model, file=logfile, flush=True)
     return model
 
 
@@ -115,42 +125,40 @@ def get_perf_stats(labels, measures):
     return auc, imtafe
 
 
+def get_unique_dir(base_dir):
+    """Get a unique directory using file locking to prevent race conditions"""
+    lock_file = os.path.join(os.path.dirname(base_dir), ".dir_lock")
+    lock = filelock.FileLock(lock_file, timeout=60)  # 60 second timeout
+
+    with lock:
+        trial_num = 0
+        while True:
+            trial_dir = os.path.join(base_dir, f"trial-{trial_num}")
+            if not os.path.exists(trial_dir):
+                os.makedirs(trial_dir)
+                return trial_dir
+            trial_num += 1
+
+
 def main(args):
     t0 = time.time()
     # set up results directory
     options = Options.load(args.option_file)
+    args.use_parT = options.use_parT_encoder
     args.output_dim = options.emb_dim
-
-    if args.flatten:
-        args.output_dim *= 20
     out_dir = args.out_dir
     args.opt = "adam"
-    args.learning_rate = 0.00005 * args.batch_size / 128
+    args.learning_rate = 1e-4 * args.batch_size / 128
 
     # check if experiment already exists and is not empty
-
-    if os.path.isdir(out_dir) and os.listdir(out_dir):
-        sys.exit(
-            "ERROR: experiment already exists and is not empty, don't want to overwrite it by mistake"
-        )
+    if not args.from_checkpoint:
+        out_dir = get_unique_dir(out_dir)
     else:
-        # This will create the directory if it does not exist or if it is empty
+        # Ensure directory exists for checkpoint loading
         os.makedirs(out_dir, exist_ok=True)
-
     # initialise logfile
-    args.logfile = out_dir + "logfile.txt"
+    args.logfile = f"{out_dir}/logfile.txt"
     logfile = open(args.logfile, "a")
-    print("logfile initialised", file=logfile, flush=True)
-    if args.flatten:
-        print("aggregation method: flatten", file=logfile, flush=True)
-    elif args.sum:
-        print("aggregation method: sum", file=logfile, flush=True)
-    else:
-        raise ValueError("No aggregation method specified")
-    if args.finetune:
-        print("finetuning (jjepa weights not frozen)", file=logfile, flush=True)
-    else:
-        print("lct (jjepa weights frozen)", file=logfile, flush=True)
 
     # define the global base device
     world_size = torch.cuda.device_count()
@@ -165,6 +173,42 @@ def main(args):
         print("Device: CPU", file=logfile, flush=True)
     args.device = device
 
+    if args.flatten and not args.cls:
+        args.output_dim *= 128
+
+    checkpoint = {}
+    checkpoint_path = os.path.join(out_dir, "last_checkpoint.pt")
+    if os.path.isfile(checkpoint_path):
+        checkpoint = torch.load(checkpoint_path, map_location=args.device)
+        print(
+            f"Previous checkpoint found. Restarting from epoch {checkpoint['epoch'] + 1}"
+        )
+        args.from_checkpoint = 1
+
+    if not args.from_checkpoint:
+        print("logfile initialised", file=logfile, flush=True)
+        if args.use_parT:
+            print("use particle transformer", file=logfile, flush=True)
+        else:
+            print("use jet transformer", file=logfile, flush=True)
+        print("output dimension: " + str(args.output_dim), file=logfile, flush=True)
+        if not args.cls:
+            if args.flatten:
+                print("aggregation method: flatten", file=logfile, flush=True)
+            elif args.sum:
+                print("aggregation method: sum", file=logfile, flush=True)
+            else:
+                raise ValueError("No aggregation method specified")
+        else:
+            print("classification head", file=logfile, flush=True)
+        if args.finetune:
+            print("finetuning (jjepa weights not frozen)", file=logfile, flush=True)
+        else:
+            print("lct (jjepa weights frozen)", file=logfile, flush=True)
+    else:
+        print("loading from checkpoint", file=logfile, flush=True)
+    print(f"batch size: {args.batch_size}", file=logfile, flush=True)
+
     # print purpose of experiment
     if "from_scratch" in args.label:
         print("training from scratch", file=logfile, flush=True)
@@ -172,8 +216,32 @@ def main(args):
     print(f"finetune: {args.finetune}", file=logfile, flush=True)
 
     print("loading data")
-    train_dataloader = load_data(args.train_dataset_path, "train")
-    val_dataloader = load_data(args.val_dataset_path, "val")
+    train_dataloader, train_stats = load_data(args, args.train_dataset_path, "train")
+    val_dataloader, val_stats = load_data(args, args.val_dataset_path, "val")
+    if args.small:
+        print("using small dataset for finetuning", file=logfile, flush=True)
+        print(
+            f"number of jets for training: {len(train_dataloader.dataset):e}",
+            file=logfile,
+            flush=True,
+        )
+        print(
+            f"number of jets for validation: {len(val_dataloader.dataset):e}",
+            file=logfile,
+            flush=True,
+        )
+    else:
+        print("using full dataset for finetuning", file=logfile, flush=True)
+        print(
+            f"number of jets for training: {len(train_dataloader.dataset):e}",
+            file=logfile,
+            flush=True,
+        )
+        print(
+            f"number of jets for validation: {len(val_dataloader.dataset):e}",
+            file=logfile,
+            flush=True,
+        )
 
     t1 = time.time()
 
@@ -188,37 +256,58 @@ def main(args):
     # initialise the network
     model = load_model(logfile, options, args.load_jjepa_path, args.device)
     net = model.target_transformer
+    if args.finetune:
+        for param in net.parameters():
+            param.requires_grad = True
+    else:
+        for param in net.parameters():
+            param.requires_grad = False
 
     # initialize the MLP projector
     finetune_mlp_dim = args.output_dim
     if args.finetune_mlp:
         finetune_mlp_dim = f"{args.output_dim}-{args.finetune_mlp}"
-    proj = Projector(2, finetune_mlp_dim).to(args.device)
+    if args.cls:
+        proj = ClassificationHead(finetune_mlp_dim).to(args.device)
+    else:
+        proj = Projector(2, finetune_mlp_dim).to(args.device)
+    for param in proj.parameters():
+        param.requires_grad = True
     print(f"finetune mlp: {proj}", flush=True, file=logfile)
     if args.finetune:
         optimizer = optim.Adam(
             [{"params": proj.parameters()}, {"params": net.parameters(), "lr": 1e-6}],
-            lr=1e-4,
+            lr=args.learning_rate,
         )
         net.train()
     else:
         net.eval()
-        optimizer = optim.Adam(proj.parameters(), lr=1e-4)
+        optimizer = optim.Adam(proj.parameters(), lr=args.learning_rate)
 
     loss = nn.CrossEntropyLoss(reduction="mean")
-
+    epoch_start = 0
     l_val_best = 99999
     acc_val_best = 0
     rej_val_best = 0
+    # Load the checkpoint
+    if args.from_checkpoint:
+        # Load state dictionaries
+        net.load_state_dict(checkpoint["encoder"])
+        proj.load_state_dict(checkpoint["projector"])
+        optimizer.load_state_dict(checkpoint["opt"])
+
+        # Restore additional variables
+        epoch_start = checkpoint["epoch"] + 1
+        l_val_best = checkpoint["val loss"]
+        acc_val_best = checkpoint["val acc"]
+        rej_val_best = checkpoint["val rej"]
 
     softmax = torch.nn.Softmax(dim=1)
     loss_train_all = []
     loss_val_all = []
     acc_val_all = []
 
-    for epoch in range(args.n_epochs):
-        # re-batch the data on each epoch
-
+    for epoch in range(epoch_start, args.n_epochs):
         # initialise timing stats
         te_start = time.time()
         te0 = time.time()
@@ -232,26 +321,34 @@ def main(args):
         # the inner loop goes through the dataset batch by batch
         proj.train()
         pbar = tqdm(train_dataloader)
-        for i, (x, _, subjets, _, subjet_mask, _, labels) in enumerate(pbar):
+        for i, (p4_spatial, p4, particle_mask, labels) in enumerate(pbar):
             optimizer.zero_grad()
 
             y = labels.to(args.device)
-            x = x.view(x.shape[0], x.shape[1], -1)
-            x = x.to(args.device)
-            batch = {"particles": x.to(torch.float32)}
-            reps = net(
-                batch,
-                subjet_mask.to(args.device),
-                subjets_meta=subjets.to(args.device),
-                split_mask=None,
+            particle_mask = particle_mask.squeeze(-1).bool()
+            p4 = p4.to(dtype=torch.float32)
+            p4_spatial = p4_spatial.to(dtype=torch.float32)
+            p4 = p4.to(device, non_blocking=True)
+            p4_spatial = p4_spatial.to(device, non_blocking=True)
+            particle_mask = particle_mask.to(
+                device, non_blocking=True, dtype=torch.float32
             )
-            if args.flatten:
-                reps = reps.view(reps.shape[0], -1)
-            elif args.sum:
-                reps = reps.sum(dim=1)
+            if args.use_parT:
+                reps = net(
+                    p4, p4_spatial, particle_mask, split_mask=None, stats=train_stats
+                )
             else:
-                raise ValueError("No aggregation method specified")
-            out = proj(reps)
+                reps = net(p4, particle_mask, split_mask=None, stats=train_stats)
+            if not args.cls:
+                if args.flatten:
+                    reps = reps.view(reps.shape[0], -1)
+                elif args.sum:
+                    reps = reps.sum(dim=1)
+                else:
+                    raise ValueError("No aggregation method specified")
+                out = proj(reps)
+            else:
+                out = proj(reps.transpose(0, 1), padding_mask=particle_mask == 0)
             batch_loss = loss(out, y.long()).to(args.device)
             batch_loss.backward()
             optimizer.step()
@@ -269,24 +366,32 @@ def main(args):
         with torch.no_grad():
             proj.eval()
             pbar = tqdm(val_dataloader)
-            for i, (x, _, subjets, _, subjet_mask, _, labels) in enumerate(pbar):
+            for i, (p4_spatial, p4, particle_mask, labels) in enumerate(pbar):
                 y = labels.to(args.device)
-                x = x.view(x.shape[0], x.shape[1], -1)
-                x = x.to(args.device)
-                batch = {"particles": x.to(torch.float32)}
-                reps = net(
-                    batch,
-                    subjet_mask.to(args.device),
-                    subjets_meta=subjets.to(args.device),
-                    split_mask=None,
+                particle_mask = particle_mask.squeeze(-1).bool()
+                p4 = p4.to(dtype=torch.float32)
+                p4_spatial = p4_spatial.to(dtype=torch.float32)
+                p4 = p4.to(device, non_blocking=True)
+                p4_spatial = p4_spatial.to(device, non_blocking=True)
+                particle_mask = particle_mask.to(
+                    device, non_blocking=True, dtype=torch.float32
                 )
-                if args.flatten:
-                    reps = reps.view(reps.shape[0], -1)
-                elif args.sum:
-                    reps = reps.sum(dim=1)
+                if args.use_parT:
+                    reps = net(
+                        p4, p4_spatial, particle_mask, split_mask=None, stats=val_stats
+                    )
                 else:
-                    raise ValueError("No aggregation method specified")
-                out = proj(reps)
+                    reps = net(p4, particle_mask, split_mask=None, stats=val_stats)
+                if not args.cls:
+                    if args.flatten:
+                        reps = reps.view(reps.shape[0], -1)
+                    elif args.sum:
+                        reps = reps.sum(dim=1)
+                    else:
+                        raise ValueError("No aggregation method specified")
+                    out = proj(reps)
+                else:
+                    out = proj(reps.transpose(0, 1), padding_mask=particle_mask == 0)
                 batch_loss = loss(out, y.long()).detach().cpu().item()
                 losses_e_val.append(batch_loss)
                 predicted_e.append(softmax(out).cpu().data.numpy())
@@ -326,26 +431,21 @@ def main(args):
 
         # save the latest model
         if args.finetune:
-            torch.save(net.state_dict(), out_dir + "jjepa_finetune_last" + ".pt")
-        torch.save(proj.state_dict(), out_dir + "projector_finetune_last" + ".pt")
-
+            torch.save(net.state_dict(), f"{out_dir}/jjepa_finetune_last.pt")
+        torch.save(proj.state_dict(), f"{out_dir}/projector_finetune_last.pt")
         # save the model if lowest val loss is achieved
         if loss_val_all[-1] < l_val_best:
             # print("new lowest val loss", flush=True, file=logfile)
             l_val_best = loss_val_all[-1]
             if args.finetune:
-                torch.save(
-                    net.state_dict(), out_dir + "jjepa_finetune_best_loss" + ".pt"
-                )
-            torch.save(
-                proj.state_dict(), out_dir + "projector_finetune_best_loss" + ".pt"
-            )
+                torch.save(net.state_dict(), f"{out_dir}/jjepa_finetune_best_loss.pt")
+            torch.save(proj.state_dict(), f"{out_dir}/projector_finetune_best_loss.pt")
             np.save(
-                f"{out_dir}validation_target_vals_loss.npy",
+                f"{out_dir}/validation_target_vals_loss.npy",
                 target,
             )
             np.save(
-                f"{out_dir}validation_predicted_vals_loss.npy",
+                f"{out_dir}/validation_predicted_vals_loss.npy",
                 predicted,
             )
         # also save the model if highest val accuracy is achieved
@@ -353,18 +453,14 @@ def main(args):
             print("new highest val accuracy", flush=True, file=logfile)
             acc_val_best = acc_val_all[-1]
             if args.finetune:
-                torch.save(
-                    net.state_dict(), out_dir + "jjepa_finetune_best_acc" + ".pt"
-                )
-            torch.save(
-                proj.state_dict(), out_dir + "projector_finetune_best_acc" + ".pt"
-            )
+                torch.save(net.state_dict(), f"{out_dir}/jjepa_finetune_best_acc.pt")
+            torch.save(proj.state_dict(), f"{out_dir}/projector_finetune_best_acc.pt")
             np.save(
-                f"{out_dir}validation_target_vals_acc.npy",
+                f"{out_dir}/validation_target_vals_acc.npy",
                 target,
             )
             np.save(
-                f"{out_dir}validation_predicted_vals_acc.npy",
+                f"{out_dir}/validation_predicted_vals_acc.npy",
                 predicted,
             )
         # calculate the AUC and imtafe and output to the logfile
@@ -380,32 +476,28 @@ def main(args):
 
             rej_val_best = imtafe
             if args.finetune:
-                torch.save(
-                    net.state_dict(), out_dir + "jjepa_finetune_best_rej" + ".pt"
-                )
-            torch.save(
-                proj.state_dict(), out_dir + "projector_finetune_best_rej" + ".pt"
-            )
+                torch.save(net.state_dict(), f"{out_dir}/jjepa_finetune_best_rej.pt")
+            torch.save(proj.state_dict(), f"{out_dir}/projector_finetune_best_rej.pt")
             np.save(
-                f"{out_dir}validation_target_vals_rej.npy",
+                f"{out_dir}/validation_target_vals_rej.npy",
                 target,
             )
             np.save(
-                f"{out_dir}validation_predicted_vals_rej.npy",
+                f"{out_dir}/validation_predicted_vals_rej.npy",
                 predicted,
             )
 
         # save all losses and accuracies
         np.save(
-            f"{out_dir}loss_train.npy",
+            f"{out_dir}/loss_train.npy",
             np.array(loss_train_all),
         )
         np.save(
-            f"{out_dir}loss_val.npy",
+            f"{out_dir}/loss_val.npy",
             np.array(loss_val_all),
         )
         np.save(
-            f"{out_dir}acc_val.npy",
+            f"{out_dir}/acc_val.npy",
             np.array(acc_val_all),
         )
         te_end = time.time()
@@ -414,6 +506,17 @@ def main(args):
             flush=True,
             file=logfile,
         )
+        # save checkpoint, including optimizer state, model state, epoch, and loss
+        save_dict = {
+            "encoder": net.state_dict(),
+            "projector": proj.state_dict(),
+            "opt": optimizer.state_dict(),
+            "epoch": epoch,
+            "val loss": loss_val_all[-1],
+            "val acc": acc_val_all[-1],
+            "val rej": imtafe,
+        }
+        torch.save(save_dict, f"{out_dir}/last_checkpoint.pt")
 
     # Training done
     print("Training done", flush=True, file=logfile)
@@ -494,7 +597,7 @@ if __name__ == "__main__":
         type=int,
         action="store",
         dest="batch_size",
-        default=32,
+        default=256,
         help="batch_size",
     )
     parser.add_argument(
@@ -510,6 +613,29 @@ if __name__ == "__main__":
         action="store",
         default=1,
         help="sum the representation",
+    )
+    parser.add_argument(
+        "--cls",
+        type=int,
+        action="store",
+        default=0,
+        help="whether to use class attention blocks in the classification head",
+    )
+    parser.add_argument(
+        "--from-checkpoint",
+        type=int,
+        action="store",
+        dest="from_checkpoint",
+        default=0,
+        help="whether to start from a checkpoint",
+    )
+    parser.add_argument(
+        "--small",
+        type=int,
+        action="store",
+        dest="small",
+        default=0,
+        help="whether to use a small dataset (10%) for finetuning",
     )
 
     args = parser.parse_args()
